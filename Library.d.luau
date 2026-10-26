@@ -1094,6 +1094,10 @@ export type Library = {
         Rotation: number?
     ) -> (),
     Validate: (self: Library, Table: { [string]: any }, Template: { [string]: any }) -> { [string]: any },
+    Weather: string,
+    WeatherDim: number,
+    SetWeather: (self: Library, Name: string?) -> (),
+    GetWeatherTypes: (self: Library) -> { string },
     GetBetterColor: (self: Library, Color: Color3, Add: number) -> Color3,
     GetLighterColor: (self: Library, Color: Color3) -> Color3,
     GetDarkerColor: (self: Library, Color: Color3) -> Color3,

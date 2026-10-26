@@ -337,6 +337,9 @@ end
 local function BuildCurrentThemeData(): {[string]: any}
     local Library = ThemeManager.Library
     local ThemeData = {}
+    if Library.Weather and Library.Weather ~= "None" then
+        ThemeData.Weather = Library.Weather
+    end
     if Library.Options.FontFace then
         ThemeData.FontFace = Library.Options.FontFace.Value
     end
@@ -666,6 +669,17 @@ function ThemeManager:ApplyThemeData(ThemeData: any): (boolean, string?)
             continue
         end
 
+        if Index == "Weather" then
+            local WeatherOption = Library.Options.ThemeManager_Weather
+            if typeof(Value) == "string" and WeatherOption then
+                WeatherOption:SetValue(Value)
+            elseif typeof(Value) == "string" then
+                Library:SetWeather(Value)
+            end
+
+            continue
+        end
+
         local Element = Library.Options[Index]
         local FinalValue = Value
 
@@ -863,6 +877,16 @@ function ThemeManager:CreateThemeManager(Themesbox: any)
     CreateColorOption("Toggle Low Contrast", "ToggleOffColor")
     CreateColorOption("Text Color", "FontColor")
     CreateColorOption("Deselected Text", "MutedFontColor")
+
+    Themesbox:AddDropdown("ThemeManager_Weather", {
+        Text = "Weather",
+        Values = Library:GetWeatherTypes(),
+        Default = Library.Weather or "None",
+        AllowNull = false,
+        Callback = function(Value)
+            Library:SetWeather(Value)
+        end,
+    })
 
     ThemeList = Themesbox:AddDropdown("ThemeManager_ThemeList", {
         Text = "Themes",

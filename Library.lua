@@ -228,6 +228,10 @@ local Library = {
 
     WindowAnimationInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
     WindowSlideOffset = 10,
+
+    --// Weather backdrop
+    Weather = "None",
+    WeatherDim = 0.45, --// backdrop transparency while weather is on (lower = darker)
     DropdownTransitionInfo = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
     KeyPickerTransitionInfo = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 
@@ -1944,6 +1948,217 @@ local Overlay = New("Frame", {
 
 Library.Floats = Floats
 Library.Overlay = Overlay
+
+--// Weather: a dimmed full-screen backdrop with falling particles, shown only while the menu is open
+local SetWeatherShown
+do
+    local WeatherPresets = {
+        Snow = {
+            Count = 70,
+            Make = function()
+                local Size = math.random(2, 5)
+                return {
+                    Size = Vector2.new(Size, Size),
+                    Round = true,
+                    Color = Color3.new(1, 1, 1),
+                    Transparency = math.random(10, 50) / 100,
+                    Fall = math.random(25, 60),
+                    Drift = 0,
+                    Sway = math.random(8, 22),
+                    SwaySpeed = math.random(5, 12) / 10,
+                    Spin = 0,
+                }
+            end,
+        },
+        Rain = {
+            Count = 90,
+            Make = function()
+                return {
+                    Size = Vector2.new(1, math.random(12, 24)),
+                    Round = false,
+                    Color = Color3.fromRGB(180, 200, 230),
+                    Transparency = math.random(40, 70) / 100,
+                    Fall = math.random(700, 1000),
+                    Drift = 0.2, --// horizontal speed as a fraction of fall speed
+                    Sway = 0,
+                    SwaySpeed = 0,
+                    Spin = 0,
+                }
+            end,
+        },
+        Sakura = {
+            Count = 40,
+            Make = function()
+                local Tints = {
+                    Color3.fromRGB(255, 183, 197),
+                    Color3.fromRGB(255, 205, 215),
+                    Color3.fromRGB(248, 160, 182),
+                }
+                return {
+                    Size = Vector2.new(math.random(6, 9), math.random(4, 6)),
+                    Round = true,
+                    Color = Tints[math.random(1, #Tints)],
+                    Transparency = math.random(5, 30) / 100,
+                    Fall = math.random(35, 70),
+                    Drift = math.random(20, 50) / 100,
+                    Sway = math.random(12, 28),
+                    SwaySpeed = math.random(4, 9) / 10,
+                    Spin = math.random(40, 120) * (math.random() < 0.5 and -1 or 1),
+                }
+            end,
+        },
+    }
+
+    local Backdrop = New("Frame", {
+        Active = false,
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 1,
+        ClipsDescendants = true,
+        Name = "Weather",
+        Size = UDim2.fromScale(1, 1),
+        Visible = false,
+        ZIndex = 0, --// sits under the window and everything else in the ScreenGui
+        Parent = ScreenGui,
+    })
+    local ParticleLayer = New("CanvasGroup", {
+        BackgroundTransparency = 1,
+        GroupTransparency = 1,
+        Size = UDim2.fromScale(1, 1),
+        ZIndex = 0,
+        Parent = Backdrop,
+    })
+
+    local Particles = {}
+    local Elapsed = 0
+    local StepConnection
+    local Shown = false
+
+    local function ClearParticles()
+        for _, Particle in Particles do
+            Particle.Frame:Destroy()
+        end
+        table.clear(Particles)
+    end
+
+    local function Respawn(Particle, Bounds: Vector2, AnywhereVertically: boolean)
+        Particle.X = math.random() * Bounds.X
+        Particle.Y = if AnywhereVertically then math.random() * Bounds.Y else -Particle.Spec.Size.Y - math.random(0, 40)
+        Particle.Phase = math.random() * math.pi * 2
+    end
+
+    local function BuildParticles(Name: string)
+        ClearParticles()
+
+        local Preset = WeatherPresets[Name]
+        if not Preset then
+            return
+        end
+
+        local Bounds = Backdrop.AbsoluteSize
+        for _ = 1, Preset.Count do
+            local Spec = Preset.Make()
+            local Frame = Instance.new("Frame")
+            Frame.AnchorPoint = Vector2.new(0.5, 0.5)
+            Frame.BackgroundColor3 = Spec.Color
+            Frame.BackgroundTransparency = Spec.Transparency
+            Frame.BorderSizePixel = 0
+            Frame.Size = UDim2.fromOffset(Spec.Size.X, Spec.Size.Y)
+            if Spec.Round then
+                local Corner = Instance.new("UICorner")
+                Corner.CornerRadius = UDim.new(1, 0)
+                Corner.Parent = Frame
+            end
+            if Spec.Drift > 0 and Spec.Spin == 0 then
+                Frame.Rotation = -math.deg(math.atan(Spec.Drift))
+            end
+            Frame.Parent = ParticleLayer
+
+            local Particle = { Frame = Frame, Spec = Spec, Rotation = math.random(0, 360) }
+            Respawn(Particle, Bounds, true)
+            table.insert(Particles, Particle)
+        end
+    end
+
+    local function Step(DeltaTime: number)
+        Elapsed += DeltaTime
+        local Bounds = Backdrop.AbsoluteSize
+
+        for _, Particle in Particles do
+            local Spec = Particle.Spec
+            Particle.Y += Spec.Fall * DeltaTime
+            Particle.X += Spec.Fall * Spec.Drift * DeltaTime
+
+            if Particle.Y > Bounds.Y + Spec.Size.Y + 10 or Particle.X > Bounds.X + 40 then
+                Respawn(Particle, Bounds, false)
+            end
+
+            local SwayOffset = if Spec.Sway > 0 then math.sin(Elapsed * Spec.SwaySpeed + Particle.Phase) * Spec.Sway else 0
+            Particle.Frame.Position = UDim2.fromOffset(Particle.X + SwayOffset, Particle.Y)
+
+            if Spec.Spin ~= 0 then
+                Particle.Rotation += Spec.Spin * DeltaTime
+                Particle.Frame.Rotation = Particle.Rotation
+            end
+        end
+    end
+
+    local function Apply()
+        local Active = Shown and Library.Weather ~= "None" and #Particles > 0
+
+        if Active then
+            --// Stretch up under Roblox's top bar; the inset isn't known until the client is ready
+            local Inset = GuiService:GetGuiInset().Y
+            Backdrop.Position = UDim2.fromOffset(0, -Inset)
+            Backdrop.Size = UDim2.new(1, 0, 1, Inset)
+            Backdrop.Visible = true
+            if not StepConnection then
+                StepConnection = Library:GiveSignal(RunService.RenderStepped:Connect(Step))
+            end
+        end
+
+        TweenService:Create(Backdrop, Library.WindowAnimationInfo, {
+            BackgroundTransparency = if Active then Library.WeatherDim else 1,
+        }):Play()
+        TweenService:Create(ParticleLayer, Library.WindowAnimationInfo, {
+            GroupTransparency = if Active then 0 else 1,
+        }):Play()
+
+        if not Active then
+            task.delay(Library.WindowAnimationInfo.Time, function()
+                if Shown and Library.Weather ~= "None" then
+                    return
+                end
+
+                Backdrop.Visible = false
+                if StepConnection then
+                    StepConnection:Disconnect()
+                    StepConnection = nil
+                end
+            end)
+        end
+    end
+
+    --// Called by the window when it opens or closes
+    SetWeatherShown = function(Visible: boolean)
+        Shown = Visible == true
+        Apply()
+    end
+
+    function Library:SetWeather(Name: string?)
+        local Chosen: string = if Name and WeatherPresets[Name] then Name else "None"
+        if Chosen == Library.Weather and #Particles > 0 then
+            return
+        end
+
+        Library.Weather = Chosen
+        BuildParticles(Chosen)
+        Apply()
+    end
+
+    function Library:GetWeatherTypes(): { string }
+        return { "None", "Snow", "Sakura", "Rain" }
+    end
+end
 
 local function RestoreMouseIcon()
     pcall(function() 
@@ -14560,6 +14775,8 @@ function Library:CreateWindow(WindowInfo)
         else
             Library.Toggled = not Library.Toggled
         end
+
+        SetWeatherShown(Library.Toggled)
 
         if Library.Animations and Library.Animations.ToggleWindow == true then
             local FadeTime = Library.WindowAnimationInfo.Time
