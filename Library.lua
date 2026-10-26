@@ -559,6 +559,18 @@ local Templates = {
         Disabled = false,
         Visible = true,
     },
+    ListBox = {
+        Values = {},
+        Height = 150,
+        AllowNull = true,
+        Placeholder = "Nothing here yet",
+
+        Callback = function() end,
+        Changed = function() end,
+
+        Disabled = false,
+        Visible = true,
+    },
     Viewport = {
         Object = nil,
         Camera = nil,
@@ -9910,6 +9922,271 @@ do
         end
 
         return Dropdown
+    end
+
+    --// Always-open selectable list, e.g. a config browser. Value is the selected entry (or nil).
+    function Funcs:AddListBox(Idx, Info)
+        if self.Destroyed then return nil end
+
+        Info = Library:Validate(Info, Templates.ListBox)
+
+        local Groupbox = self
+        local Container = Groupbox.Container
+
+        local ListBox = {
+            Connections = {},
+            Destroyed = false,
+
+            Text = Info.Text,
+            Values = Info.Values,
+            Value = Info.Default,
+
+            Callback = Info.Callback,
+            Changed = Info.Changed,
+            FormatListValue = Info.FormatListValue,
+
+            AllowNull = Info.AllowNull,
+            Disabled = Info.Disabled,
+            Visible = Info.Visible,
+
+            Type = "ListBox",
+        }
+
+        local LabelHeight = Info.Text and 18 or 0
+
+        local Holder = New("Frame", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, LabelHeight + Info.Height),
+            Visible = ListBox.Visible,
+            Parent = Container,
+        })
+
+        local Label = New("TextLabel", {
+            BackgroundTransparency = 1,
+            FontFace = "FontMedium",
+            Size = UDim2.new(1, 0, 0, 14),
+            Text = Info.Text or "",
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Visible = Info.Text ~= nil,
+            Parent = Holder,
+        })
+
+        local Box = New("ScrollingFrame", {
+            AnchorPoint = Vector2.new(0, 1),
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            BackgroundColor3 = "MainColor",
+            CanvasSize = UDim2.fromScale(0, 0),
+            Position = UDim2.fromScale(0, 1),
+            ScrollBarImageColor3 = "FontColor",
+            ScrollBarImageTransparency = 0.6,
+            ScrollBarThickness = 2,
+            ScrollingDirection = Enum.ScrollingDirection.Y,
+            Size = UDim2.new(1, 0, 0, Info.Height),
+            Parent = Holder,
+        })
+        New("UIStroke", {
+            Color = "OutlineColor",
+            Parent = Box,
+        })
+        table.insert(
+            Library.Corners,
+            New("UICorner", {
+                CornerRadius = UDim.new(0, Library.CornerRadius / 2),
+                Parent = Box,
+            })
+        )
+        New("UIPadding", {
+            PaddingBottom = UDim.new(0, 4),
+            PaddingLeft = UDim.new(0, 4),
+            PaddingRight = UDim.new(0, 6),
+            PaddingTop = UDim.new(0, 4),
+            Parent = Box,
+        })
+        New("UIListLayout", {
+            Padding = UDim.new(0, 2),
+            Parent = Box,
+        })
+
+        local EmptyLabel = New("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 22),
+            Text = Info.Placeholder,
+            TextColor3 = "MutedFontColor",
+            TextSize = 12,
+            Visible = false,
+            Parent = Box,
+        })
+
+        local Rows = {}
+
+        local function StyleRow(Row, Hovered: boolean?)
+            local Selected = ListBox.Value == Row.Value
+
+            TweenService:Create(Row.Button, Library.HoverTweenInfo, {
+                BackgroundTransparency = if Selected then 0 elseif Hovered then 0.5 else 1,
+                TextTransparency = if ListBox.Disabled then 0.8 elseif Selected then 0 elseif Hovered then 0.2 else 0.45,
+            }):Play()
+        end
+
+        function ListBox:Display()
+            if Library.Unloaded then
+                return
+            end
+
+            for _, Row in Rows do
+                StyleRow(Row)
+            end
+        end
+
+        function ListBox:UpdateColors()
+            ListBox:Display()
+        end
+
+        function ListBox:OnChanged(Func)
+            ListBox.Changed = Func
+        end
+
+        function ListBox:RunChanged()
+            Library:SafeCallback(ListBox.Callback, ListBox.Value)
+            Library:SafeCallback(ListBox.Changed, ListBox.Value)
+        end
+
+        function ListBox:SetValue(Value)
+            if Value ~= nil and not table.find(ListBox.Values, Value) then
+                Value = nil
+            end
+
+            ListBox.Value = Value
+            ListBox:Display()
+            ListBox:RunChanged()
+        end
+
+        function ListBox:SetValues(Values)
+            ListBox.Values = Values or {}
+
+            for _, Row in Rows do
+                Row.Button:Destroy()
+            end
+            table.clear(Rows)
+
+            for Index, Value in ListBox.Values do
+                local Text = tostring(Value)
+                if typeof(ListBox.FormatListValue) == "function" then
+                    Text = tostring(ListBox.FormatListValue(Value))
+                end
+
+                local Button = New("TextButton", {
+                    BackgroundColor3 = function()
+                        return Library:GetBetterColor(Library.Scheme.MainColor, 8)
+                    end,
+                    BackgroundTransparency = 1,
+                    LayoutOrder = Index,
+                    Size = UDim2.new(1, 0, 0, 22),
+                    Text = Text,
+                    TextSize = 12,
+                    TextTransparency = 0.45,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Parent = Box,
+                })
+                New("UIPadding", {
+                    PaddingLeft = UDim.new(0, 8),
+                    PaddingRight = UDim.new(0, 8),
+                    Parent = Button,
+                })
+                table.insert(
+                    Library.Corners,
+                    New("UICorner", {
+                        CornerRadius = UDim.new(0, Library.CornerRadius / 2),
+                        Parent = Button,
+                    })
+                )
+
+                local Row = { Button = Button, Value = Value }
+                table.insert(Rows, Row)
+
+                Button.MouseEnter:Connect(function()
+                    if not ListBox.Disabled then
+                        StyleRow(Row, true)
+                    end
+                end)
+                Button.MouseLeave:Connect(function()
+                    StyleRow(Row)
+                end)
+                Button.MouseButton1Click:Connect(function()
+                    if ListBox.Disabled then
+                        return
+                    end
+
+                    if ListBox.Value == Value then
+                        if ListBox.AllowNull then
+                            ListBox:SetValue(nil)
+                        end
+                        return
+                    end
+
+                    ListBox:SetValue(Value)
+                end)
+            end
+
+            EmptyLabel.Visible = #ListBox.Values == 0
+
+            if ListBox.Value ~= nil and not table.find(ListBox.Values, ListBox.Value) then
+                ListBox.Value = nil
+            end
+            ListBox:Display()
+        end
+
+        function ListBox:SetDisabled(Disabled: boolean)
+            ListBox.Disabled = Disabled
+            Box.ScrollingEnabled = not Disabled
+            Label.TextTransparency = Disabled and 0.8 or 0
+            ListBox:Display()
+        end
+
+        function ListBox:SetVisible(Visible: boolean)
+            ListBox.Visible = Visible
+            Holder.Visible = Visible
+            Groupbox:Resize()
+        end
+
+        function ListBox:SetText(Text: string)
+            ListBox.Text = Text
+            Label.Text = Text
+        end
+
+        function ListBox:Destroy()
+            ListBox.Destroyed = true
+
+            for _, Connection in ListBox.Connections do
+                Connection:Disconnect()
+            end
+
+            if Holder then
+                Holder:Destroy()
+            end
+
+            local ElemIdx = table.find(Groupbox.Elements, ListBox)
+            if ElemIdx then
+                table.remove(Groupbox.Elements, ElemIdx)
+            end
+
+            Groupbox:Resize()
+            Options[Idx] = nil
+        end
+
+        ListBox:SetValues(ListBox.Values)
+        ListBox:SetDisabled(ListBox.Disabled)
+        Groupbox:Resize()
+
+        ListBox.Holder = Holder
+        table.insert(Groupbox.Elements, ListBox)
+
+        ListBox.Default = ListBox.Value
+        Options[Idx] = ListBox
+
+        return ListBox
     end
 
     function Funcs:AddViewport(Idx, Info)
