@@ -396,6 +396,7 @@ local Templates = {
 
         SearchbarSize = UDim2.fromScale(1, 1),
         GlobalSearch = false,
+        DisableSearch = true,
 
         CornerRadius = 6,
         NotifySide = "Right",
@@ -8984,6 +8985,16 @@ do
                 if SearchBox then
                     SearchBox.Text = ""
                     SearchBox.Visible = Active
+
+                    if Active then
+                        task.defer(function()
+                            if MenuTable.Active and SearchBox.Visible then
+                                SearchBox:CaptureFocus()
+                            end
+                        end)
+                    elseif SearchBox:IsFocused() then
+                        SearchBox:ReleaseFocus()
+                    end
                 end
 
                 local Half = UDim.new(0, Library.CornerRadius / 2)
@@ -11459,6 +11470,12 @@ function Library:CreateWindow(WindowInfo)
     local SearchWidth = 150
     local ContentTop = HeaderHeight + TabBarHeight + 8
 
+    --// Grip sits in the footer's corner, inset further as the window corner rounds
+    local function GetResizeGripPosition(Radius: number): UDim2
+        local Inset = 4 + math.floor(Radius / 4)
+        return UDim2.new(1, -Inset, 1, -Inset)
+    end
+
     --// Old Naming \\--
     if WindowInfo.Compact ~= nil then
         WindowInfo.SidebarCompacted = WindowInfo.Compact
@@ -11504,8 +11521,6 @@ function Library:CreateWindow(WindowInfo)
     local Container
     local BackgroundImage
     local HasBackgroundImage = false
-    local BottomBackground
-    local BottomBackgroundCorner
     local FooterLabel
     local TopBar
     local WindowSnapConfig = {
@@ -11861,7 +11876,7 @@ function Library:CreateWindow(WindowInfo)
         TitleHolder = New("Frame", {
             BackgroundTransparency = 1,
             Position = UDim2.fromOffset(WindowPadding + 2, 0),
-            Size = UDim2.new(1, -SearchWidth - WindowPadding * 3, 1, 0),
+            Size = UDim2.new(1, if WindowInfo.DisableSearch then -WindowPadding * 2 else -SearchWidth - WindowPadding * 3, 1, 0),
             Parent = TopBar,
         })
         New("UIListLayout", {
@@ -11962,7 +11977,7 @@ function Library:CreateWindow(WindowInfo)
             Size = UDim2.fromScale(1, 1),
             TextSize = 13,
             TextXAlignment = Enum.TextXAlignment.Left,
-            Visible = not (WindowInfo.DisableSearch or false),
+            Visible = not WindowInfo.DisableSearch,
             Parent = RightWrapper,
         })
         table.insert(
@@ -12060,15 +12075,6 @@ function Library:CreateWindow(WindowInfo)
             Parent = MainFrame,
         })
 
-        --// Kept for SetCornerRadius; the footer has no fill of its own
-        BottomBackground = New("Frame", {
-            BackgroundTransparency = 1,
-            Size = UDim2.fromOffset(0, 0),
-            Parent = BottomBar,
-        })
-        BottomBackgroundCorner = New("UICorner", {
-            Parent = BottomBackground,
-        })
 
         --// Footer \\-
         FooterLabel = New("TextLabel", {
@@ -12086,7 +12092,7 @@ function Library:CreateWindow(WindowInfo)
             ResizeButton = New("TextButton", {
                 AnchorPoint = Vector2.new(1, 1),
                 BackgroundTransparency = 1,
-                Position = UDim2.new(1, -4, 1, -4),
+                Position = GetResizeGripPosition(WindowInfo.CornerRadius),
                 Size = UDim2.fromOffset(16, 16),
                 Text = "",
                 Parent = BottomBar,
@@ -12253,12 +12259,7 @@ function Library:CreateWindow(WindowInfo)
         WindowInfo.CornerRadius = Radius
 
         if ResizeButton then
-            ResizeButton.Position = UDim2.new(1, -Radius / 4, 0, 0)
-        end
-        if BottomBackgroundCorner then
-            BottomBackground.Size = UDim2.new(1, 0, 0, math.max(20, Radius * 2))
-            BottomBackgroundCorner.BottomLeftRadius = RadiusUDim
-            BottomBackgroundCorner.BottomRightRadius = RadiusUDim
+            ResizeButton.Position = GetResizeGripPosition(Radius)
         end
 
         for _, Menu in Library.ContextMenus do
