@@ -8856,8 +8856,9 @@ do
         }); table.insert(Library.SpecificCorners, DropdownCorner)
 
         local DisplayImage = New("ImageLabel", {
+            AnchorPoint = Vector2.new(0, 0.5),
             BackgroundTransparency = 1,
-            Position = UDim2.fromOffset(-4, 4),
+            Position = UDim2.new(0, -4, 0.5, 0),
             Size = UDim2.fromOffset(16, 16),
             Image = "",
             ImageTransparency = 1,
@@ -8868,7 +8869,7 @@ do
         local DisplayButton = New("TextButton", {
             Active = not Dropdown.Disabled,
             BackgroundTransparency = 1,
-            Size = UDim2.new(1, -18, 0, 23),
+            Size = UDim2.new(1, -18, 1, 0),
             Text = "---",
             TextSize = 12,
             TextTruncate = Enum.TextTruncate.AtEnd,
@@ -9110,7 +9111,8 @@ do
                 DisplayImage.ImageTransparency = 1
             end
 
-            DisplayButton.Size = ValueImage and UDim2.new(1, -8, 0, 21) or UDim2.new(1, 0, 0, 21)
+            --// Full field height keeps the value vertically centred; the right inset clears the chevron
+            DisplayButton.Size = ValueImage and UDim2.new(1, -32, 1, 0) or UDim2.new(1, -18, 1, 0)
             DisplayButton.Position = ValueImage and UDim2.fromOffset(14, 0) or UDim2.fromOffset(0, 0)
         end
 
