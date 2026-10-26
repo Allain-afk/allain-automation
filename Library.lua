@@ -11791,6 +11791,8 @@ function Library:CreateWindow(WindowInfo)
     local WindowTitle
     local WindowIcon
     local RightWrapper
+    local UsernameLabel
+    local BadgeLabel
     local SearchBox
     local CurrentTabInfo
     local CurrentTabLabel
@@ -12155,7 +12157,7 @@ function Library:CreateWindow(WindowInfo)
         TitleHolder = New("Frame", {
             BackgroundTransparency = 1,
             Position = UDim2.fromOffset(WindowPadding + 2, 0),
-            Size = UDim2.new(1, if WindowInfo.DisableSearch then -WindowPadding * 2 else -SearchWidth - WindowPadding * 3, 1, 0),
+            Size = UDim2.new(1, -WindowPadding * 2, 1, 0),
             Parent = TopBar,
         })
         New("UIListLayout", {
@@ -12192,7 +12194,7 @@ function Library:CreateWindow(WindowInfo)
             LayoutOrder = 1,
             Size = UDim2.fromOffset(0, 0),
             Text = WindowInfo.Title,
-            TextSize = 14,
+            TextSize = 13,
             TextTruncate = Enum.TextTruncate.AtEnd,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextYAlignment = Enum.TextYAlignment.Center,
@@ -12226,14 +12228,68 @@ function Library:CreateWindow(WindowInfo)
         end
         RefreshWindowTitleSize()
 
-        --// Top Right Bar \\--
+        --// Top Right Bar: [search] username [badge], right-aligned and sized to its content
         RightWrapper = New("Frame", {
             AnchorPoint = Vector2.new(1, 0.5),
+            AutomaticSize = Enum.AutomaticSize.X,
             BackgroundTransparency = 1,
             Position = UDim2.new(1, -WindowPadding, 0.5, 0),
-            Size = UDim2.fromOffset(SearchWidth, 26),
+            Size = UDim2.fromOffset(0, 26),
             Parent = TopBar,
         })
+        New("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            HorizontalAlignment = Enum.HorizontalAlignment.Right,
+            Padding = UDim.new(0, 10),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            Parent = RightWrapper,
+        })
+
+        UsernameLabel = New("TextLabel", {
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundTransparency = 1,
+            FontFace = "FontMedium",
+            LayoutOrder = 2,
+            Size = UDim2.fromScale(0, 1),
+            Text = "",
+            TextColor3 = "MutedFontColor",
+            TextSize = 13,
+            Visible = false,
+            Parent = RightWrapper,
+        })
+
+        BadgeLabel = New("TextLabel", {
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundColor3 = "MainColor",
+            FontFace = "FontBold",
+            LayoutOrder = 3,
+            Size = UDim2.fromOffset(0, 26),
+            Text = "",
+            TextSize = 13,
+            Visible = false,
+            Parent = RightWrapper,
+        })
+        New("UICorner", {
+            CornerRadius = UDim.new(1, 0),
+            Parent = BadgeLabel,
+        })
+        New("UIPadding", {
+            PaddingLeft = UDim.new(0, 13),
+            PaddingRight = UDim.new(0, 13),
+            Parent = BadgeLabel,
+        })
+
+        --// The title row gets whatever the right cluster leaves, so long titles truncate instead of overlapping
+        local function FitTitleHolder()
+            local RightWidth = RightWrapper.AbsoluteSize.X / Library.DPIScale
+            TitleHolder.Size = UDim2.new(1, -WindowPadding * 2 - 2 - (if RightWidth > 0 then RightWidth + 12 else 0), 1, 0)
+            if RefreshWindowTitleSize then
+                RefreshWindowTitleSize()
+            end
+        end
+        Library:GiveSignal(RightWrapper:GetPropertyChangedSignal("AbsoluteSize"):Connect(FitTitleHolder))
+        FitTitleHolder()
 
         --// Tab descriptions now surface as tooltips; these stay for API compatibility
         CurrentTabInfo = New("Frame", {
@@ -12252,8 +12308,9 @@ function Library:CreateWindow(WindowInfo)
             BackgroundColor3 = "MainColor",
             BackgroundTransparency = 0.4,
             ClearTextOnFocus = false,
+            LayoutOrder = 1,
             PlaceholderText = "Search",
-            Size = UDim2.fromScale(1, 1),
+            Size = UDim2.new(0, SearchWidth, 1, 0),
             TextSize = 13,
             TextXAlignment = Enum.TextXAlignment.Left,
             Visible = not WindowInfo.DisableSearch,
@@ -12477,6 +12534,20 @@ function Library:CreateWindow(WindowInfo)
 
         HasBackgroundImage = ValidIcon
         WindowInfo.BackgroundImage = Image
+    end
+
+    --// Muted text left of the badge; nil hides it
+    function Window:SetUsername(Username: string?)
+        WindowInfo.Username = Username
+        UsernameLabel.Text = Username or ""
+        UsernameLabel.Visible = typeof(Username) == "string" and Username ~= ""
+    end
+
+    --// Filled pill at the far right of the header (e.g. a tier or build name); nil hides it
+    function Window:SetBadge(Badge: string?)
+        WindowInfo.Badge = Badge
+        BadgeLabel.Text = Badge or ""
+        BadgeLabel.Visible = typeof(Badge) == "string" and Badge ~= ""
     end
 
     function Window:SetFooter(Footer: string)
@@ -15053,6 +15124,9 @@ function Library:CreateWindow(WindowInfo)
     end
 
     Window:SetAlwaysOnTop(WindowInfo.AlwaysOnTop)
+    --// Username = true shows the local player's name
+    Window:SetUsername(if WindowInfo.Username == true then LocalPlayer.Name else WindowInfo.Username)
+    Window:SetBadge(WindowInfo.Badge)
     if WindowInfo.EnableCompacting and WindowInfo.SidebarCompacted then
         Window:SetSidebarWidth(WindowInfo.SidebarCompactWidth)
     end
