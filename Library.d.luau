@@ -987,6 +987,8 @@ export type Window = {
     SetToggleButtonVisible: (self: Window, Visible: boolean) -> (),
     SetBadge: (self: Window, Badge: string?) -> (),
     SetFooter: (self: Window, Footer: string) -> (),
+    SetFooterLeft: (self: Window, Text: string?) -> (),
+    SetFooterRight: (self: Window, Text: string?) -> (),
     SetAlwaysOnTop: (self: Window, Enabled: boolean) -> (),
     SetCornerRadius: (self: Window, Radius: number) -> (),
     SetSnapping: (
@@ -1217,6 +1219,8 @@ export type Library = {
             ShowMobileButtons: boolean?,
             MobileButtonsSide: "Left" | "Right"?,
             ShowToggleButton: boolean?,
+            FooterLeft: string?,
+            FooterRight: string?,
             ToggleButtonIcon: string?,
             UnlockMouseWhileOpen: boolean?,
             EnableSidebarResize: boolean?,

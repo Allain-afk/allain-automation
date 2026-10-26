@@ -4550,31 +4550,31 @@ do
                     Parent = Checkbox,
                 })
             )
-            New("UIStroke", {
+            local CheckboxStroke = New("UIStroke", {
                 Color = "OutlineColor",
                 Parent = Checkbox,
             })
-
-            local CheckImage = New("ImageLabel", {
-                ImageColor3 = "FontColor",
-                ImageTransparency = 1,
-                Position = UDim2.fromOffset(2, 2),
-                Size = UDim2.new(1, -4, 1, -4),
+            New("UIGradient", {
+                Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(196, 196, 200)),
+                Rotation = 90,
                 Parent = Checkbox,
             })
-            if CheckIcon then
-                Library:ApplyLucideIcon(CheckImage, CheckIcon)
-            end
 
             function KeybindsToggle:Display(State)
-                if KeyPicker.Mode == "Press" then
-                    Label.TextTransparency = 0.4
-                    CheckImage.ImageTransparency = 1
-                    return
-                end
+                local On = State and KeyPicker.Mode ~= "Press"
+                local Fill = On and "AccentColor" or "ToggleOffColor"
+                local Edge = On and "AccentColor" or "OutlineColor"
 
-                Label.TextTransparency = State and 0 or 0.5
-                CheckImage.ImageTransparency = State and 0 or 1
+                Library.Registry[Checkbox].BackgroundColor3 = Fill
+                Library.Registry[CheckboxStroke].Color = Edge
+
+                Label.TextTransparency = if KeyPicker.Mode == "Press" then 0.4 elseif On then 0 else 0.5
+                TweenService:Create(Checkbox, Library.HoverTweenInfo, {
+                    BackgroundColor3 = GetSchemeValue(Fill),
+                }):Play()
+                TweenService:Create(CheckboxStroke, Library.HoverTweenInfo, {
+                    Color = GetSchemeValue(Edge),
+                }):Play()
             end
 
             function KeybindsToggle:SetText(Text)
@@ -7238,18 +7238,12 @@ do
             Parent = Checkbox,
         })
 
-        --// The check sits on the accent fill, so it takes the background tone for contrast
-        local CheckImage = New("ImageLabel", {
-            AnchorPoint = Vector2.new(0.5, 0.5),
-            ImageColor3 = "BackgroundColor",
-            ImageTransparency = 1,
-            Position = UDim2.fromScale(0.5, 0.5),
-            Size = UDim2.fromOffset(6, 6),
+        --// No tick: the box itself fills with the accent, with a soft top-to-bottom sheen
+        New("UIGradient", {
+            Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(196, 196, 200)),
+            Rotation = 90,
             Parent = Checkbox,
         })
-        if CheckIcon then
-            Library:ApplyLucideIcon(CheckImage, CheckIcon)
-        end
 
         local Interaction = BindInteraction(Button, {
             Scale = CheckboxScale,
@@ -7278,8 +7272,6 @@ do
 
             if Toggle.Disabled then
                 Label.TextTransparency = 0.8
-                CheckImage.ImageTransparency = Toggle.Value and 0.6 or 1
-                CheckImage.Size = UDim2.fromOffset(10, 10)
 
                 Checkbox.BackgroundColor3 = GetSchemeValue(Fill)
                 Checkbox.BackgroundTransparency = 0.6
@@ -7301,10 +7293,6 @@ do
             TweenService:Create(CheckboxStroke, Library.HoverTweenInfo, {
                 Color = if not Toggle.Value and Hovering then Library:GetLighterColor(Library.Scheme.OutlineColor) else GetSchemeValue(Edge),
                 Transparency = 0,
-            }):Play()
-            TweenService:Create(CheckImage, Library.GlideTweenInfo, {
-                ImageTransparency = Toggle.Value and 0 or 1,
-                Size = Toggle.Value and UDim2.fromOffset(10, 10) or UDim2.fromOffset(6, 6),
             }):Play()
         end
 
@@ -11372,6 +11360,8 @@ function Library:CreateWindow(WindowInfo)
     local BackgroundImage
     local HasBackgroundImage = false
     local FooterLabel
+    local FooterLeftLabel
+    local FooterRightLabel
     local TopBar
     local WindowSnapConfig = {
         Enabled = WindowInfo.Snapping,
@@ -11992,6 +11982,33 @@ function Library:CreateWindow(WindowInfo)
             Parent = BottomBar,
         })
 
+        --// Optional corner texts either side of the centred footer (e.g. a link and a build stamp)
+        FooterLeftLabel = New("TextLabel", {
+            BackgroundTransparency = 1,
+            FontFace = "FontMedium",
+            Position = UDim2.fromOffset(WindowPadding + 2, 0),
+            Size = UDim2.new(0.5, -WindowPadding - 2, 1, 0),
+            Text = WindowInfo.FooterLeft or "",
+            TextColor3 = "MutedFontColor",
+            TextSize = 12,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = BottomBar,
+        })
+        FooterRightLabel = New("TextLabel", {
+            AnchorPoint = Vector2.new(1, 0),
+            BackgroundTransparency = 1,
+            FontFace = "FontMedium",
+            Position = UDim2.new(1, -(WindowPadding + 16), 0, 0), --// clears the resize grip
+            Size = UDim2.new(0.5, -WindowPadding - 16, 1, 0),
+            Text = WindowInfo.FooterRight or "",
+            TextColor3 = "MutedFontColor",
+            TextSize = 12,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            Parent = BottomBar,
+        })
+
         --// Resize Button \\--
         if WindowInfo.Resizable then
             ResizeButton = New("TextButton", {
@@ -12124,6 +12141,16 @@ function Library:CreateWindow(WindowInfo)
 
         FooterLabel.Text = Footer
         WindowInfo.Footer = Footer
+    end
+
+    function Window:SetFooterLeft(Text: string?)
+        FooterLeftLabel.Text = Text or ""
+        WindowInfo.FooterLeft = Text
+    end
+
+    function Window:SetFooterRight(Text: string?)
+        FooterRightLabel.Text = Text or ""
+        WindowInfo.FooterRight = Text
     end
 
     function Window:SetAlwaysOnTop(Enabled: boolean)

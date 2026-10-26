@@ -12,7 +12,9 @@ local Toggles = Library.Toggles
 --// Window \\--
 local Window = Library:CreateWindow({
 	Title = "Sydney",
-	Footer = "sydney · example",
+	Footer = "sydney · example", -- centred
+	FooterLeft = "discord.gg/example", -- optional corner texts; change later with
+	FooterRight = "Build: dev", --         Window:SetFooterLeft / SetFooterRight
 
 	-- Header, right side: a muted name and a filled badge pill
 	Username = true, -- true shows the local player's name; a string shows that text
