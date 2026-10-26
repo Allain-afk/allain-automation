@@ -226,7 +226,8 @@ local Library = {
     TabSwipeOffset = 26,
     TabSwipeFrom = "bottom",
 
-    WindowAnimationInfo = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+    WindowAnimationInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+    WindowSlideOffset = 10,
     DropdownTransitionInfo = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
     KeyPickerTransitionInfo = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
 
@@ -256,7 +257,6 @@ local Library = {
     ShowToggleFrameInKeybinds = true,
 
     NotifyOnError = false,
-    ShowCustomCursor = true,
     ForceCheckbox = false,
 
     CantDragForced = false,
@@ -401,7 +401,6 @@ local Templates = {
 
         CornerRadius = 6,
         NotifySide = "Right",
-        ShowCustomCursor = true,
 
         Font = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Medium),
         ToggleKeybind = Enum.KeyCode.RightControl,
@@ -430,7 +429,7 @@ local Templates = {
 
         --// Animations \\--
         Animations = {
-            ToggleWindow = false,
+            ToggleWindow = true,
             TabSwitch = false,
             Groupbox = false,
             Dropdown = false,
@@ -1945,74 +1944,6 @@ local Overlay = New("Frame", {
 Library.Floats = Floats
 Library.Overlay = Overlay
 
---// Cursor
-local Cursor
-local CursorCross
-local InnerCross = {}
-local CursorCustomImage
-do
-    Cursor = New("Frame", {
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        BackgroundTransparency = 1,
-        Size = UDim2.fromOffset(1, 1),
-        Visible = false,
-        ZIndex = 11000,
-        Parent = ScreenGui,
-    })
-
-    CursorCross = New("Frame", {
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        BackgroundTransparency = 1,
-        Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.fromOffset(11, 11),
-        Parent = Cursor,
-    })
-
-    New("Frame", {
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        BackgroundColor3 = "DarkColor",
-        Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.new(1, 0, 0, 3),
-        ZIndex = 1,
-        Parent = CursorCross,
-    })
-    table.insert(InnerCross, New("Frame", {
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        BackgroundColor3 = "WhiteColor",
-        Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.new(1, -2, 0, 1),
-        ZIndex = 2,
-        Parent = CursorCross,
-    }))
-
-    New("Frame", {
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        BackgroundColor3 = "DarkColor",
-        Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.new(0, 3, 1, 0),
-        ZIndex = 1,
-        Parent = CursorCross,
-    })
-    table.insert(InnerCross, New("Frame", {
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        BackgroundColor3 = "WhiteColor",
-        Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.new(0, 1, 1, -2),
-        ZIndex = 2,
-        Parent = CursorCross,
-    }))
-
-    CursorCustomImage = New("ImageLabel", {
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        BackgroundTransparency = 1,
-        Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.fromOffset(20, 20),
-        ZIndex = 3,
-        Visible = false,
-        Parent = Cursor,
-    })
-end
-
 local function RestoreMouseIcon()
     pcall(function() 
         RunService:UnbindFromRenderStep(Library.ShowCursorBinding)
@@ -2020,7 +1951,6 @@ local function RestoreMouseIcon()
     end)
 
     UserInputService.MouseIconEnabled = Library.OriginalMouseIconEnabled
-    if Cursor then Cursor.Visible = false end
 end
 
 --// Notification \\--
@@ -2081,95 +2011,6 @@ do
 end
 
 --// Lib Functions \\--
-Library.Cursor = {}
-
-function Library.Cursor:ResetCross()
-    for _, Inner in InnerCross do
-        Library.Registry[Inner].BackgroundColor3 = "WhiteColor"
-        Inner.BackgroundColor3 = Library.Scheme.WhiteColor
-    end
-end
-
-function Library.Cursor:ResetIcon()
-    CursorCross.Visible = true
-    CursorCustomImage.Visible = false
-    CursorCustomImage.ImageColor3 = Color3.new(1, 1, 1)
-    CursorCustomImage.Size = UDim2.fromOffset(20, 20)
-end
-
-function Library.Cursor:ResetCursor()
-    Library.Cursor:ResetCross()
-    Library.Cursor:ResetIcon()
-end
-
-function Library.Cursor:ChangeCrossColor(Color: Color3)
-    assert(typeof(Color) == "Color3", "Color3 expected.")
-    for _, Inner in InnerCross do
-        Inner.BackgroundColor3 = Color
-        Library.Registry[Inner].BackgroundColor3 = nil
-    end
-end
-
-function Library.Cursor:ChangeIcon(ImageId: string)
-    if not ImageId or ImageId == "" then
-        Library.Cursor:ResetIcon()
-        return
-    end
-
-    local Icon = Library:GetCustomIcon(ImageId)
-    assert(Icon, "Image must be a valid Roblox asset or a valid URL or a valid lucide icon.")
-
-    CursorCross.Visible = false
-    CursorCustomImage.Visible = true
-    Library:ApplyLucideIcon(CursorCustomImage, Icon)
-end
-
-function Library.Cursor:ChangeIconColor(Color: Color3)
-    assert(typeof(Color) == "Color3", "Color3 expected.")
-    CursorCustomImage.ImageColor3 = Color
-end
-
-function Library.Cursor:ChangeIconSize(Size: UDim2)
-    assert(typeof(Size) == "UDim2", "UDim2 expected.")
-    CursorCustomImage.Size = Size
-end
-
---// DEPRECATED
-function Library:ChangeCursorCrossColor(Color: Color3)
-    warn("Obsidian:ChangeCursorCrossColor is deprecated, please use Obsidian.Cursor:ChangeCrossColor instead.")
-    Library.Cursor:ChangeCrossColor(Color)
-end
-
---// DEPRECATED
-function Library:ResetCursorCross()
-    warn("Obsidian:ResetCursorCross is deprecated, please use Obsidian.Cursor:ResetCross instead.")
-    Library.Cursor:ResetCross()
-end
-
---// DEPRECATED
-function Library:ChangeCursorIcon(ImageId: string)
-    warn("Obsidian:ChangeCursorIcon is deprecated, please use Obsidian.Cursor:ChangeIcon instead.")
-    Library.Cursor:ChangeIcon(ImageId)
-end
-
---// DEPRECATED
-function Library:ChangeCursorIconColor(Color: Color3)
-    warn("Obsidian:ChangeCursorIconColor is deprecated, please use Obsidian.Cursor:ChangeIconColor instead.")
-    Library.Cursor:ChangeIconColor(Color)
-end
-
---// DEPRECATED
-function Library:ChangeCursorIconSize(Size: UDim2)
-    warn("Obsidian:ChangeCursorIconSize is deprecated, please use Obsidian.Cursor:ChangeIconSize instead.")
-    Library.Cursor:ChangeIconSize(Size)
-end
-
---// DEPRECATED
-function Library:ResetCursorIcon()
-    warn("Obsidian:ResetCursorIcon is deprecated, please use Obsidian.Cursor:ResetIcon instead.")
-    Library.Cursor:ResetIcon()
-end
-
 --// Colors \\--
 function Library:GetBetterColor(Color: Color3, Add: number): Color3
     Add = Add * (Library.IsLightTheme and -4 or 2)
@@ -4217,10 +4058,7 @@ function Library:AddTooltip(InfoStr: string, DisabledInfoStr: string, HoverInsta
         end
 
         local function CursorAnchor()
-            return Vector2.new(
-                Mouse.X + (Library.ShowCustomCursor and 10 or 14),
-                Mouse.Y + (Library.ShowCustomCursor and 10 or 12)
-            )
+            return Vector2.new(Mouse.X + 14, Mouse.Y + 12)
         end
 
         --// Fade in from slightly below the cursor, then trail it with a little easing
@@ -11794,7 +11632,6 @@ function Library:CreateWindow(WindowInfo)
 
     Library.CornerRadius = WindowInfo.CornerRadius
     Library:SetNotifySide(WindowInfo.NotifySide)
-    Library.ShowCustomCursor = WindowInfo.ShowCustomCursor
     Library.Scheme.Font = WindowInfo.Font
     Library.ToggleKeybind = WindowInfo.ToggleKeybind
     Library.GlobalSearch = WindowInfo.GlobalSearch
@@ -14945,6 +14782,8 @@ function Library:CreateWindow(WindowInfo)
     local TextProperties = { "BackgroundTransparency", "TextTransparency" }
     local StrokeProperties = { "Transparency" }
 
+    local OpenPosition = MainFrame.Position
+
     local function FadeInstance(Desc, Properties)
         local Cache = TransparencyCache[Desc]
         if not Cache then
@@ -14990,16 +14829,24 @@ function Library:CreateWindow(WindowInfo)
             local FadeTime = Library.WindowAnimationInfo.Time
             Fading = true
 
+            --// Everything fades together while the window drifts a few pixels down (out) or up (in)
+            local Drift = UDim2.fromOffset(0, Library.WindowSlideOffset)
             if Library.Toggled then
+                MainFrame.Position = OpenPosition + Drift
                 MainFrame.Visible = true
+
+                TweenService:Create(MainFrame, Library.WindowAnimationInfo, {
+                    Position = OpenPosition,
+                }):Play()
+            else
+                OpenPosition = MainFrame.Position
+
+                TweenService:Create(MainFrame, Library.WindowAnimationInfo, {
+                    Position = OpenPosition + Drift,
+                }):Play()
             end
 
-            if Library.Toggled then
-                FadeInstance(MainFrame, { "BackgroundTransparency" })
-                task.wait(FadeTime / 2)
-            else
-                task.delay(FadeTime / 2, FadeInstance, MainFrame, { "BackgroundTransparency" })
-            end
+            FadeInstance(MainFrame, { "BackgroundTransparency" })
 
             for _, Instance in MainFrame:GetDescendants() do
                 if Instance == TopBar then
@@ -15022,6 +14869,9 @@ function Library:CreateWindow(WindowInfo)
 
             task.delay(FadeTime, function()
                 MainFrame.Visible = Library.Toggled
+                if not Library.Toggled then
+                    MainFrame.Position = OpenPosition
+                end
                 Fading = false
             end)
         else
@@ -15038,10 +14888,7 @@ function Library:CreateWindow(WindowInfo)
 
             pcall(function() RunService:UnbindFromRenderStep(ShowCursorBinding) end)
             RunService:BindToRenderStep(ShowCursorBinding, Enum.RenderPriority.Last.Value, function()
-                UserInputService.MouseIconEnabled = not Library.ShowCustomCursor
-
-                Cursor.Position = UDim2.fromOffset(Mouse.X, Mouse.Y)
-                Cursor.Visible = Library.ShowCustomCursor
+                UserInputService.MouseIconEnabled = true
 
                 if Library.Unloaded == true or not (Library.Toggled and ScreenGui and ScreenGui.Parent) then
                     RestoreMouseIcon()

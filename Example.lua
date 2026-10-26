@@ -18,7 +18,6 @@ local Window = Library:CreateWindow({
 	-- Set AutoShow to true if you want the menu to appear when it is created
 	-- Set Resizable to true if you want to have in-game resizable Window
 	-- Set MobileButtonsSide to "Left" or "Right" if you want the ui toggle & lock buttons to be on the left or right side of the window
-	-- Set ShowCustomCursor to false if you don't want to use the Linoria cursor
 	-- Set AlwaysOnTop to true if you want the menu to render above Roblox core blur (executor only)
 	-- NotifySide = Changes the side of the notifications (Left, Right) (Default value = Left)
 	-- Position and Size are also valid options here
@@ -28,7 +27,6 @@ local Window = Library:CreateWindow({
 	Footer = "version: example",
 	Icon = 95816097006870,
 	NotifySide = "Right",
-	ShowCustomCursor = true,
 })
 
 -- CALLBACK NOTE:
@@ -737,13 +735,6 @@ MenuGroup:AddToggle("KeybindMenuVisibilityControl", {
 	Text = "Keybind Menu Visibility",
 	Callback = function(value)
 		Library.KeybindMenu:SetVisibilityControl(value)
-	end,
-})
-MenuGroup:AddToggle("ShowCustomCursor", {
-	Text = "Custom Cursor",
-	Default = Library.ShowCustomCursor,
-	Callback = function(Value)
-		Library.ShowCustomCursor = Value
 	end,
 })
 MenuGroup:AddToggle("AlwaysOnTop", {
