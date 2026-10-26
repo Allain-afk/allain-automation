@@ -1664,6 +1664,66 @@ local function New(ClassName: string, Properties: { [string]: any }): any
     return Instance
 end
 
+--// Shared hover + press feel: OnHover(bool) restyles, Scale (a UIScale) dips while held
+local function BindInteraction(Button: GuiButton, Info: { OnHover: ((boolean) -> ())?, Scale: UIScale?, PressScale: number?, Enabled: (() -> boolean)? })
+    local Hovering, Holding = false, false
+
+    local function IsEnabled()
+        return Info.Enabled == nil or Info.Enabled()
+    end
+
+    local function SetHover(State: boolean)
+        if Hovering == State then
+            return
+        end
+
+        Hovering = State
+        if Info.OnHover then
+            Info.OnHover(State and IsEnabled())
+        end
+    end
+
+    local function SetHold(State: boolean)
+        if Holding == State or not Info.Scale then
+            return
+        end
+
+        Holding = State
+        TweenService:Create(Info.Scale, State and Library.PressTweenInfo or Library.GlideTweenInfo, {
+            Scale = State and (Info.PressScale or 0.94) or 1,
+        }):Play()
+    end
+
+    local Connections = {
+        Button.MouseEnter:Connect(function()
+            SetHover(true)
+        end),
+        Button.MouseLeave:Connect(function()
+            SetHover(false)
+            SetHold(false)
+        end),
+        Button.MouseButton1Down:Connect(function()
+            if IsEnabled() then
+                SetHold(true)
+            end
+        end),
+        Button.MouseButton1Up:Connect(function()
+            SetHold(false)
+        end),
+    }
+
+    return {
+        IsHovering = function()
+            return Hovering
+        end,
+        Disconnect = function()
+            for _, Connection in Connections do
+                Connection:Disconnect()
+            end
+        end,
+    }
+end
+
 function Library:ApplyLucideIcon(ImageGui: any, Icon: any, Rotation: number?)
     if not ImageGui or not Icon then
         return
@@ -6763,14 +6823,14 @@ do
 
         local Holder = New("Frame", {
             BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, 21),
+            Size = UDim2.new(1, 0, 0, 24),
             Parent = Container,
         })
 
         New("UIListLayout", {
             FillDirection = Enum.FillDirection.Horizontal,
             HorizontalFlex = Enum.UIFlexAlignment.Fill,
-            Padding = UDim.new(0, 9),
+            Padding = UDim.new(0, 8),
             Parent = Holder,
         })
 
@@ -6828,6 +6888,9 @@ do
                     Parent = Base,
                 })
             )
+            Button.Scale = New("UIScale", {
+                Parent = Base,
+            })
 
             local Content = New("Frame", {
                 AnchorPoint = Vector2.new(0.5, 0.5),
@@ -6854,11 +6917,12 @@ do
             Button.Label = New("TextLabel", {
                 AutomaticSize = Enum.AutomaticSize.X,
                 BackgroundTransparency = 1,
+                FontFace = "FontMedium",
                 LayoutOrder = 1,
                 Size = UDim2.fromOffset(0, 16),
                 Text = Button.Text,
-                TextSize = 14,
-                TextTransparency = Button.Disabled and 0.8 or 0.4,
+                TextSize = 13,
+                TextTransparency = Button.Disabled and 0.8 or 0.15,
                 Parent = Content,
             })
 
@@ -6873,38 +6937,40 @@ do
         end
 
         local function InitEvents(Button)
-            table.insert(Button.Connections, Button.Base.MouseEnter:Connect(function()
+            --// Hover lifts the fill and edge a step; press dips the scale
+            local function SetHovered(Hovered: boolean)
                 if Button.Disabled then
                     return
                 end
 
-                Button.Tween = TweenService:Create(Button.Label, Library.TweenInfo, {
-                    TextTransparency = 0,
+                Button.Tween = TweenService:Create(Button.Label, Library.HoverTweenInfo, {
+                    TextTransparency = Hovered and 0 or 0.15,
                 })
                 Button.Tween:Play()
 
-                if Button.IconImage and Button.IconImage.Visible then
-                    TweenService:Create(Button.IconImage, Library.TweenInfo, {
-                        ImageTransparency = 0,
-                    }):Play()
-                end
-            end))
-            table.insert(Button.Connections, Button.Base.MouseLeave:Connect(function()
-                if Button.Disabled then
-                    return
-                end
-
-                Button.Tween = TweenService:Create(Button.Label, Library.TweenInfo, {
-                    TextTransparency = 0.4,
-                })
-                Button.Tween:Play()
+                TweenService:Create(Button.Base, Library.HoverTweenInfo, {
+                    BackgroundColor3 = Hovered and Library:GetBetterColor(Library.Scheme.MainColor, 6) or Library.Scheme.MainColor,
+                }):Play()
+                TweenService:Create(Button.Stroke, Library.HoverTweenInfo, {
+                    Color = Hovered and Library:GetLighterColor(Library.Scheme.OutlineColor) or Library.Scheme.OutlineColor,
+                }):Play()
 
                 if Button.IconImage and Button.IconImage.Visible then
-                    TweenService:Create(Button.IconImage, Library.TweenInfo, {
-                        ImageTransparency = 0.4,
+                    TweenService:Create(Button.IconImage, Library.HoverTweenInfo, {
+                        ImageTransparency = Hovered and 0 or 0.4,
                     }):Play()
                 end
-            end))
+            end
+
+            local Interaction = BindInteraction(Button.Base, {
+                Scale = Button.Scale,
+                PressScale = 0.97,
+                Enabled = function()
+                    return not (Button.Disabled or Button.Locked)
+                end,
+                OnHover = SetHovered,
+            })
+            table.insert(Button.Connections, Interaction)
 
             table.insert(Button.Connections, Button.Base.MouseButton1Click:Connect(function()
                 if Button.Disabled or Button.Locked then
@@ -7242,11 +7308,11 @@ do
 
         local Label = New("TextLabel", {
             BackgroundTransparency = 1,
-            Position = UDim2.fromOffset(26, 0),
-            Size = UDim2.new(1, -26, 1, 0),
+            Position = UDim2.fromOffset(22, 0),
+            Size = UDim2.new(1, -22, 1, 0),
             Text = Toggle.Text,
-            TextSize = 14,
-            TextTransparency = 0.4,
+            TextSize = 13,
+            TextTransparency = 0.45,
             TextXAlignment = Enum.TextXAlignment.Left,
             Parent = Button,
         })
@@ -7259,9 +7325,10 @@ do
         })
 
         local Checkbox = New("Frame", {
+            AnchorPoint = Vector2.new(0, 0.5),
             BackgroundColor3 = "MainColor",
-            Size = UDim2.fromScale(1, 1),
-            SizeConstraint = Enum.SizeConstraint.RelativeYY,
+            Position = UDim2.fromScale(0, 0.5),
+            Size = UDim2.fromOffset(14, 14),
             Parent = Button,
         })
         table.insert(
@@ -7271,22 +7338,38 @@ do
                 Parent = Checkbox,
             })
         )
+        local CheckboxScale = New("UIScale", {
+            Parent = Checkbox,
+        })
 
         local CheckboxStroke = New("UIStroke", {
             Color = "OutlineColor",
             Parent = Checkbox,
         })
 
+        --// The check sits on the accent fill, so it takes the background tone for contrast
         local CheckImage = New("ImageLabel", {
-            ImageColor3 = "FontColor",
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            ImageColor3 = "BackgroundColor",
             ImageTransparency = 1,
-            Position = UDim2.fromOffset(2, 2),
-            Size = UDim2.new(1, -4, 1, -4),
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromOffset(6, 6),
             Parent = Checkbox,
         })
         if CheckIcon then
             Library:ApplyLucideIcon(CheckImage, CheckIcon)
         end
+
+        local Interaction = BindInteraction(Button, {
+            Scale = CheckboxScale,
+            PressScale = 0.86,
+            Enabled = function()
+                return not Toggle.Disabled
+            end,
+            OnHover = function()
+                (Toggle :: any):Display()
+            end,
+        })
 
         function Toggle:UpdateColors()
             Toggle:Display()
@@ -7297,27 +7380,41 @@ do
                 return
             end
 
-            CheckboxStroke.Transparency = Toggle.Disabled and 0.5 or 0
+            local Fill = Toggle.Value and "AccentColor" or "MainColor"
+            local Edge = Toggle.Value and "AccentColor" or "OutlineColor"
+            Library.Registry[Checkbox].BackgroundColor3 = Fill
+            Library.Registry[CheckboxStroke].Color = Edge
 
             if Toggle.Disabled then
                 Label.TextTransparency = 0.8
-                CheckImage.ImageTransparency = Toggle.Value and 0.8 or 1
+                CheckImage.ImageTransparency = Toggle.Value and 0.6 or 1
+                CheckImage.Size = UDim2.fromOffset(10, 10)
 
-                Checkbox.BackgroundColor3 = Library.Scheme.BackgroundColor
-                Library.Registry[Checkbox].BackgroundColor3 = "BackgroundColor"
+                Checkbox.BackgroundColor3 = Library.Scheme[Fill]
+                Checkbox.BackgroundTransparency = 0.6
+                CheckboxStroke.Color = Library.Scheme[Edge]
+                CheckboxStroke.Transparency = 0.6
 
                 return
             end
 
-            TweenService:Create(Label, Library.TweenInfo, {
-                TextTransparency = Toggle.Value and 0 or 0.4,
-            }):Play()
-            TweenService:Create(CheckImage, Library.TweenInfo, {
-                ImageTransparency = Toggle.Value and 0 or 1,
-            }):Play()
+            local Hovering = Interaction.IsHovering()
 
-            Checkbox.BackgroundColor3 = Library.Scheme.MainColor
-            Library.Registry[Checkbox].BackgroundColor3 = "MainColor"
+            TweenService:Create(Label, Library.HoverTweenInfo, {
+                TextTransparency = if Toggle.Value then 0 elseif Hovering then 0.2 else 0.45,
+            }):Play()
+            TweenService:Create(Checkbox, Library.HoverTweenInfo, {
+                BackgroundColor3 = Library.Scheme[Fill],
+                BackgroundTransparency = 0,
+            }):Play()
+            TweenService:Create(CheckboxStroke, Library.HoverTweenInfo, {
+                Color = if not Toggle.Value and Hovering then Library:GetLighterColor(Library.Scheme.OutlineColor) else Library.Scheme[Edge],
+                Transparency = 0,
+            }):Play()
+            TweenService:Create(CheckImage, Library.GlideTweenInfo, {
+                ImageTransparency = Toggle.Value and 0 or 1,
+                Size = Toggle.Value and UDim2.fromOffset(10, 10) or UDim2.fromOffset(6, 6),
+            }):Play()
         end
 
         function Toggle:OnChanged(Func)
@@ -7424,6 +7521,8 @@ do
             if Toggle.TooltipTable then
                 Toggle.TooltipTable:Destroy()
             end
+
+            Interaction.Disconnect()
 
             if Button then
                 Button:Destroy()
@@ -7500,10 +7599,10 @@ do
 
         local Label = New("TextLabel", {
             BackgroundTransparency = 1,
-            Size = UDim2.new(1, -40, 1, 0),
+            Size = UDim2.new(1, -36, 1, 0),
             Text = Toggle.Text,
-            TextSize = 14,
-            TextTransparency = 0.4,
+            TextSize = 13,
+            TextTransparency = 0.45,
             TextXAlignment = Enum.TextXAlignment.Left,
             Parent = Button,
         })
@@ -7516,10 +7615,10 @@ do
         })
 
         local Switch = New("Frame", {
-            AnchorPoint = Vector2.new(1, 0),
+            AnchorPoint = Vector2.new(1, 0.5),
             BackgroundColor3 = "MainColor",
-            Position = UDim2.fromScale(1, 0),
-            Size = UDim2.fromOffset(32, 18),
+            Position = UDim2.fromScale(1, 0.5),
+            Size = UDim2.fromOffset(28, 16),
             Parent = Button,
         })
         New("UICorner", {
@@ -7539,7 +7638,7 @@ do
         })
 
         local Ball = New("Frame", {
-            BackgroundColor3 = "FontColor",
+            BackgroundColor3 = "MutedFontColor",
             Size = UDim2.fromScale(1, 1),
             SizeConstraint = Enum.SizeConstraint.RelativeYY,
             Parent = Switch,
@@ -7547,6 +7646,20 @@ do
         New("UICorner", {
             CornerRadius = UDim.new(1, 0),
             Parent = Ball,
+        })
+        local SwitchScale = New("UIScale", {
+            Parent = Switch,
+        })
+
+        local Interaction = BindInteraction(Button, {
+            Scale = SwitchScale,
+            PressScale = 0.92,
+            Enabled = function()
+                return not Toggle.Disabled
+            end,
+            OnHover = function()
+                (Toggle :: any):Display()
+            end,
         })
 
         function Toggle:UpdateColors()
@@ -7559,39 +7672,46 @@ do
             end
 
             local Offset = Toggle.Value and 1 or 0
+            local Track = Toggle.Value and "AccentColor" or "MainColor"
+            local Edge = Toggle.Value and "AccentColor" or "OutlineColor"
+            local Knob = Toggle.Value and "BackgroundColor" or "MutedFontColor"
 
-            Switch.BackgroundTransparency = Toggle.Disabled and 0.75 or 0
-            SwitchStroke.Transparency = Toggle.Disabled and 0.75 or 0
-
-            Switch.BackgroundColor3 = Toggle.Value and Library.Scheme.AccentColor or Library.Scheme.MainColor
-            SwitchStroke.Color = Toggle.Value and Library.Scheme.AccentColor or Library.Scheme.OutlineColor
-
-            Library.Registry[Switch].BackgroundColor3 = Toggle.Value and "AccentColor" or "MainColor"
-            Library.Registry[SwitchStroke].Color = Toggle.Value and "AccentColor" or "OutlineColor"
+            Library.Registry[Switch].BackgroundColor3 = Track
+            Library.Registry[SwitchStroke].Color = Edge
+            Library.Registry[Ball].BackgroundColor3 = Knob
 
             if Toggle.Disabled then
                 Label.TextTransparency = 0.8
                 Ball.AnchorPoint = Vector2.new(Offset, 0)
                 Ball.Position = UDim2.fromScale(Offset, 0)
 
-                Ball.BackgroundColor3 = Library:GetDarkerColor(Library.Scheme.FontColor)
-                Library.Registry[Ball].BackgroundColor3 = function()
-                    return Library:GetDarkerColor(Library.Scheme.FontColor)
-                end
+                Switch.BackgroundColor3 = GetSchemeValue(Track)
+                Switch.BackgroundTransparency = 0.6
+                SwitchStroke.Color = GetSchemeValue(Edge)
+                SwitchStroke.Transparency = 0.6
+                Ball.BackgroundColor3 = GetSchemeValue(Knob)
 
                 return
             end
 
-            TweenService:Create(Label, Library.TweenInfo, {
-                TextTransparency = Toggle.Value and 0 or 0.4,
+            local Hovering = Interaction.IsHovering()
+
+            TweenService:Create(Label, Library.HoverTweenInfo, {
+                TextTransparency = if Toggle.Value then 0 elseif Hovering then 0.2 else 0.45,
             }):Play()
-            TweenService:Create(Ball, Library.TweenInfo, {
+            TweenService:Create(Switch, Library.HoverTweenInfo, {
+                BackgroundColor3 = GetSchemeValue(Track),
+                BackgroundTransparency = 0,
+            }):Play()
+            TweenService:Create(SwitchStroke, Library.HoverTweenInfo, {
+                Color = if not Toggle.Value and Hovering then Library:GetLighterColor(Library.Scheme.OutlineColor) else GetSchemeValue(Edge),
+                Transparency = 0,
+            }):Play()
+            TweenService:Create(Ball, Library.GlideTweenInfo, {
                 AnchorPoint = Vector2.new(Offset, 0),
                 Position = UDim2.fromScale(Offset, 0),
+                BackgroundColor3 = GetSchemeValue(Knob),
             }):Play()
-
-            Ball.BackgroundColor3 = Library.Scheme.FontColor
-            Library.Registry[Ball].BackgroundColor3 = "FontColor"
         end
 
         function Toggle:OnChanged(Func)
@@ -7699,6 +7819,8 @@ do
                 Toggle.TooltipTable:Destroy()
             end
 
+            Interaction.Disconnect()
+
             if Button then
                 Button:Destroy()
             end
@@ -7767,16 +7889,17 @@ do
 
         local Holder = New("Frame", {
             BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, 39),
+            Size = UDim2.new(1, 0, 0, 41),
             Visible = Input.Visible,
             Parent = Container,
         })
 
         local Label = New("TextLabel", {
             BackgroundTransparency = 1,
+            FontFace = "FontMedium",
             Size = UDim2.new(1, 0, 0, 14),
             Text = Input.Text,
-            TextSize = 14,
+            TextSize = 13,
             TextXAlignment = Enum.TextXAlignment.Left,
             Parent = Holder,
         })
@@ -7787,19 +7910,18 @@ do
             ClearTextOnFocus = not Input.Disabled and Input.ClearTextOnFocus,
             PlaceholderText = Input.Placeholder,
             Position = UDim2.fromScale(0, 1),
-            Size = UDim2.new(1, 0, 0, 21),
+            Size = UDim2.new(1, 0, 0, 23),
             Text = Input.Value,
             TextEditable = not Input.Disabled,
-            TextScaled = true,
+            TextSize = 12,
+            TextTruncate = Enum.TextTruncate.AtEnd,
             TextXAlignment = Enum.TextXAlignment.Left,
             Parent = Holder,
         })
 
         New("UIPadding", {
-            PaddingBottom = UDim.new(0, 3),
             PaddingLeft = UDim.new(0, 8),
             PaddingRight = UDim.new(0, 8),
-            PaddingTop = UDim.new(0, 4),
             Parent = Box,
         })
 
@@ -7815,6 +7937,28 @@ do
                 Parent = Box,
             })
         )
+
+        --// Focus glow: the edge eases toward the accent while typing
+        local function SetFocusStyle(Focused: boolean)
+            if Input.Disabled then
+                return
+            end
+
+            Library.Registry[BoxStroke].Color = Focused and "AccentColor" or "OutlineColor"
+            TweenService:Create(BoxStroke, Library.HoverTweenInfo, {
+                Color = Focused and Library.Scheme.AccentColor or Library.Scheme.OutlineColor,
+                Transparency = Focused and 0.55 or 0,
+            }):Play()
+            TweenService:Create(Box, Library.HoverTweenInfo, {
+                BackgroundColor3 = Focused and Library:GetBetterColor(Library.Scheme.MainColor, 4) or Library.Scheme.MainColor,
+            }):Play()
+        end
+        table.insert(Input.Connections, Box.Focused:Connect(function()
+            SetFocusStyle(true)
+        end))
+        table.insert(Input.Connections, Box.FocusLost:Connect(function()
+            SetFocusStyle(false)
+        end))
 
         function Input:UpdateColors()
             if Library.Unloaded then
@@ -8020,98 +8164,179 @@ do
             Type = "Slider",
         }
 
+        --// Layout: label + value + (- +) steppers on top, a slim pill track below.
+        --// Compact sliders keep a single row with the text drawn inside the track.
         local Holder = New("Frame", {
             BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, Info.Compact and 15 or 33),
+            Size = UDim2.new(1, 0, 0, Info.Compact and 16 or 32),
             Visible = Slider.Visible,
             Parent = Container,
         })
 
         local SliderLabel
+        local ValueHolder
+        local MinusButton, PlusButton
         if not Info.Compact then
             SliderLabel = New("TextLabel", {
                 BackgroundTransparency = 1,
-                Size = UDim2.new(1, 0, 0, 14),
+                FontFace = "FontMedium",
+                Size = UDim2.new(1, -96, 0, 14),
                 Text = Slider.Text,
-                TextSize = 14,
+                TextSize = 13,
+                TextTruncate = Enum.TextTruncate.AtEnd,
                 TextXAlignment = Enum.TextXAlignment.Left,
                 Parent = Holder,
             })
+
+            ValueHolder = New("Frame", {
+                AnchorPoint = Vector2.new(1, 0),
+                AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1,
+                Position = UDim2.fromScale(1, 0),
+                Size = UDim2.fromOffset(0, 14),
+                Parent = Holder,
+            })
+            New("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal,
+                HorizontalAlignment = Enum.HorizontalAlignment.Right,
+                Padding = UDim.new(0, 2),
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                VerticalAlignment = Enum.VerticalAlignment.Center,
+                Parent = ValueHolder,
+            })
+
+            local function Stepper(Text: string, Order: number)
+                local StepButton = New("TextButton", {
+                    BackgroundTransparency = 1,
+                    FontFace = "FontBold",
+                    LayoutOrder = Order,
+                    Size = UDim2.fromOffset(12, 14),
+                    Text = Text,
+                    TextColor3 = "MutedFontColor",
+                    TextSize = 13,
+                    Parent = ValueHolder,
+                })
+                table.insert(Slider.Connections, StepButton.MouseEnter:Connect(function()
+                    if Slider.Disabled then
+                        return
+                    end
+                    TweenService:Create(StepButton, Library.HoverTweenInfo, {
+                        TextColor3 = Library.Scheme.FontColor,
+                    }):Play()
+                end))
+                table.insert(Slider.Connections, StepButton.MouseLeave:Connect(function()
+                    TweenService:Create(StepButton, Library.HoverTweenInfo, {
+                        TextColor3 = GetSchemeValue("MutedFontColor"),
+                    }):Play()
+                end))
+                return StepButton
+            end
+
+            MinusButton = Stepper("-", 2)
+            PlusButton = Stepper("+", 3)
+
+            --// The label gets whatever width the value cluster leaves
+            local function FitLabel()
+                SliderLabel.Size = UDim2.new(1, -(ValueHolder.AbsoluteSize.X / Library.DPIScale) - 8, 0, 14)
+            end
+            table.insert(Slider.Connections, ValueHolder:GetPropertyChangedSignal("AbsoluteSize"):Connect(FitLabel))
+            FitLabel()
         end
 
         local Bar = New("TextButton", {
             Active = not Slider.Disabled,
             AnchorPoint = Vector2.new(0, 1),
-            BackgroundColor3 = "MainColor",
+            BackgroundTransparency = 1,
             Position = UDim2.fromScale(0, 1),
-            Size = UDim2.new(1, 0, 0, 15),
+            Size = UDim2.new(1, 0, 0, Info.Compact and 16 or 12),
             Text = "",
             Parent = Holder,
         })
 
-        New("UIStroke", {
-            Color = "OutlineColor",
+        local Track = New("Frame", {
+            AnchorPoint = Vector2.new(0, 0.5),
+            BackgroundColor3 = "MainColor",
+            Position = UDim2.fromScale(0, 0.5),
+            Size = UDim2.new(1, 0, 0, Info.Compact and 16 or 9),
             Parent = Bar,
+        })
+        New("UICorner", {
+            CornerRadius = UDim.new(1, 0),
+            Parent = Track,
+        })
+        local TrackStroke = New("UIStroke", {
+            Color = "OutlineColor",
+            Parent = Track,
         })
 
         local DisplayLabel = New("TextLabel", {
+            AnchorPoint = Info.Compact and Vector2.zero or Vector2.new(1, 0),
+            AutomaticSize = Info.Compact and Enum.AutomaticSize.None or Enum.AutomaticSize.X,
             BackgroundTransparency = 1,
-            Size = UDim2.fromScale(1, 1),
+            FontFace = "FontMedium",
+            LayoutOrder = 1,
+            Size = Info.Compact and UDim2.fromScale(1, 1) or UDim2.fromOffset(0, 14),
             Text = "",
-            TextSize = 14,
+            TextSize = Info.Compact and 12 or 13,
             ZIndex = Bar.ZIndex + 2,
-            Parent = Bar,
+            Parent = Info.Compact and Track or ValueHolder,
         })
-        New("UIStroke", {
-            ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
-            Color = "DarkColor",
-            LineJoinMode = Enum.LineJoinMode.Miter,
-            Parent = DisplayLabel,
-        })
+        if Info.Compact then
+            New("UIStroke", {
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
+                Color = "DarkColor",
+                LineJoinMode = Enum.LineJoinMode.Miter,
+                Transparency = 0.4,
+                Parent = DisplayLabel,
+            })
+        end
 
         local InputTextBox
         local InputTextBoxStroke
         if Info.AllowRightClickInput then
             InputTextBox = New("TextBox", {
+                AutomaticSize = Info.Compact and Enum.AutomaticSize.None or Enum.AutomaticSize.X,
                 BackgroundTransparency = 1,
-                Size = UDim2.fromScale(1, 1),
+                FontFace = "FontMedium",
+                LayoutOrder = 1,
+                Size = Info.Compact and UDim2.fromScale(1, 1) or UDim2.fromOffset(24, 14),
                 Text = "",
-                TextSize = 14,
+                TextSize = Info.Compact and 12 or 13,
                 ZIndex = Bar.ZIndex + 3,
                 Visible = false,
                 ClearTextOnFocus = false,
-                Parent = Bar,
+                Parent = Info.Compact and Track or ValueHolder,
             })
             InputTextBoxStroke = New("UIStroke", {
                 ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
                 Color = "DarkColor",
                 LineJoinMode = Enum.LineJoinMode.Miter,
+                Transparency = Info.Compact and 0 or 1,
                 Parent = InputTextBox,
             })
         end
 
+        --// Fill is a glossy pill: a soft top-to-bottom sheen over the accent
         local Fill = New("Frame", {
             BackgroundColor3 = "AccentColor",
             Size = UDim2.fromScale(0.5, 1),
             ZIndex = Bar.ZIndex + 1,
-            Parent = Bar,
+            Parent = Track,
+        })
+        New("UICorner", {
+            CornerRadius = UDim.new(1, 0),
+            Parent = Fill,
+        })
+        New("UIGradient", {
+            Rotation = 90,
+            Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 0),
+                NumberSequenceKeypoint.new(1, 0.25),
+            }),
+            Parent = Fill,
         })
 
-        table.insert(
-            Library.Corners,
-            New("UICorner", {
-                CornerRadius = UDim.new(0, Library.CornerRadius / 2),
-                Parent = Bar,
-            })
-        )
-
-        table.insert(
-            Library.Corners,
-            New("UICorner", {
-                CornerRadius = UDim.new(0, Library.CornerRadius / 2),
-                Parent = Fill,
-            })
-        )
+        local FillTween
 
         function Slider:UpdateColors()
             if Library.Unloaded then
@@ -8126,7 +8351,12 @@ do
             if Info.AllowRightClickInput then
                 InputTextBox.TextTransparency = Slider.Disabled and 0.8 or 0
             end
+            if MinusButton then
+                MinusButton.TextTransparency = Slider.Disabled and 0.8 or 0
+                PlusButton.TextTransparency = Slider.Disabled and 0.8 or 0
+            end
 
+            TrackStroke.Transparency = Slider.Disabled and 0.6 or 0
             Fill.BackgroundColor3 = Slider.Disabled and Library.Scheme.OutlineColor or Library.Scheme.AccentColor
             Library.Registry[Fill].BackgroundColor3 = Slider.Disabled and "OutlineColor" or "AccentColor"
         end
@@ -8147,7 +8377,8 @@ do
                 if Info.Compact then
                     DisplayLabel.Text =
                         string.format("%s: %s%s%s", Slider.Text, Slider.Prefix, Slider.Value, Slider.Suffix)
-                elseif Info.HideMax then
+                elseif Info.HideMax ~= false then
+                    --// The track already shows the range, so the max is opt-in (HideMax = false)
                     DisplayLabel.Text = string.format("%s%s%s", Slider.Prefix, Slider.Value, Slider.Suffix)
                 else
                     DisplayLabel.Text = string.format(
@@ -8162,8 +8393,15 @@ do
                 end
             end
 
+            --// Glide toward the new value instead of snapping; this is most of the "silk" feel
             local X = (Slider.Value - Slider.Min) / (Slider.Max - Slider.Min)
-            Fill.Size = UDim2.fromScale(X, 1)
+            if FillTween then
+                FillTween:Cancel()
+            end
+            FillTween = TweenService:Create(Fill, Library.GlideTweenInfo, {
+                Size = UDim2.fromScale(X, 1),
+            })
+            FillTween:Play()
         end
 
         function Slider:OnChanged(Func)
@@ -8317,6 +8555,59 @@ do
             end))
         end
 
+        if MinusButton then
+            --// One step per click; holding repeats after a short delay
+            local Step = 10 ^ -Slider.Rounding
+
+            local function Nudge(Direction: number)
+                if Slider.Disabled then
+                    return
+                end
+                Slider:SetValue(Round(Slider.Value + Step * Direction, Slider.Rounding))
+            end
+
+            local function BindStepper(StepButton: TextButton, Direction: number)
+                local HoldId = 0
+
+                table.insert(Slider.Connections, StepButton.MouseButton1Down:Connect(function()
+                    HoldId += 1
+                    local Id = HoldId
+
+                    Nudge(Direction)
+                    task.delay(0.35, function()
+                        while HoldId == Id and not Slider.Destroyed do
+                            Nudge(Direction)
+                            task.wait(0.05)
+                        end
+                    end)
+                end))
+                table.insert(Slider.Connections, StepButton.MouseButton1Up:Connect(function()
+                    HoldId += 1
+                end))
+                table.insert(Slider.Connections, StepButton.MouseLeave:Connect(function()
+                    HoldId += 1
+                end))
+            end
+
+            BindStepper(MinusButton, -1)
+            BindStepper(PlusButton, 1)
+        end
+
+        --// Hovering the track lifts its edge so it reads as grabbable
+        table.insert(Slider.Connections, Bar.MouseEnter:Connect(function()
+            if Slider.Disabled then
+                return
+            end
+            TweenService:Create(TrackStroke, Library.HoverTweenInfo, {
+                Color = Library:GetLighterColor(Library.Scheme.OutlineColor),
+            }):Play()
+        end))
+        table.insert(Slider.Connections, Bar.MouseLeave:Connect(function()
+            TweenService:Create(TrackStroke, Library.HoverTweenInfo, {
+                Color = Library.Scheme.OutlineColor,
+            }):Play()
+        end))
+
         local LastTap = 0
         table.insert(Slider.Connections, Bar.InputBegan:Connect(function(Input: InputObject)
             local ValidInput = IsClickInput(Input) or Input.UserInputType == Enum.UserInputType.MouseButton2
@@ -8362,7 +8653,7 @@ do
 
             while IsDragInput(Input) and not Slider.Destroyed do
                 local Location = Mouse.X
-                local Scale = math.clamp((Location - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
+                local Scale = math.clamp((Location - Track.AbsolutePosition.X) / Track.AbsoluteSize.X, 0, 1)
 
                 local OldValue = Slider.Value
                 Slider.Value = Round(Slider.Min + ((Slider.Max - Slider.Min) * Scale), Slider.Rounding)
@@ -8481,16 +8772,17 @@ do
 
         local Holder = New("Frame", {
             BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, Dropdown.Text and 39 or 21),
+            Size = UDim2.new(1, 0, 0, Dropdown.Text and 41 or 23),
             Visible = Dropdown.Visible,
             Parent = Container,
         })
 
         local Label = New("TextLabel", {
             BackgroundTransparency = 1,
+            FontFace = "FontMedium",
             Size = UDim2.new(1, 0, 0, 14),
             Text = Dropdown.Text,
-            TextSize = 14,
+            TextSize = 13,
             TextXAlignment = Enum.TextXAlignment.Left,
             Visible = not not Info.Text,
             ZIndex = 3,
@@ -8501,7 +8793,7 @@ do
             AnchorPoint = Vector2.new(0, 1),
             BackgroundColor3 = "MainColor",
             Position = UDim2.fromScale(0, 1),
-            Size = UDim2.new(1, 0, 0, 21),
+            Size = UDim2.new(1, 0, 0, 23),
             Text = "",
             TextTransparency = 1,
             ZIndex = 2,
@@ -8529,7 +8821,7 @@ do
 
         local DisplayImage = New("ImageLabel", {
             BackgroundTransparency = 1,
-            Position = UDim2.fromOffset(-4, 3),
+            Position = UDim2.fromOffset(-4, 4),
             Size = UDim2.fromOffset(16, 16),
             Image = "",
             ImageTransparency = 1,
@@ -8540,9 +8832,10 @@ do
         local DisplayButton = New("TextButton", {
             Active = not Dropdown.Disabled,
             BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, 21),
+            Size = UDim2.new(1, -18, 0, 23),
             Text = "---",
-            TextSize = 14,
+            TextSize = 12,
+            TextTruncate = Enum.TextTruncate.AtEnd,
             TextXAlignment = Enum.TextXAlignment.Left,
             ZIndex = 2,
             Parent = DisplayContainer,
@@ -8552,13 +8845,33 @@ do
             AnchorPoint = Vector2.new(1, 0.5),
             ImageColor3 = "FontColor",
             ImageTransparency = 0.5,
-            Position = UDim2.fromScale(1, 0.5),
-            Size = UDim2.fromOffset(16, 16),
+            Position = UDim2.new(1, -2, 0.5, 0),
+            Size = UDim2.fromOffset(14, 14),
             Parent = DisplayContainer,
         })
         if ArrowIcon then
-            Library:ApplyLucideIcon(ArrowImage, ArrowIcon)
+            Library:ApplyLucideIcon(ArrowImage, ArrowIcon, 180)
         end
+
+        --// Field hover: the edge lifts so the whole field reads as clickable
+        local DropdownOpen = false
+        local function SetFieldHover(Hovered: boolean)
+            if Dropdown.Disabled or DropdownOpen then
+                return
+            end
+            TweenService:Create(DisplayStroke, Library.HoverTweenInfo, {
+                Color = Hovered and Library:GetLighterColor(Library.Scheme.OutlineColor) or Library.Scheme.OutlineColor,
+            }):Play()
+            TweenService:Create(ArrowImage, Library.HoverTweenInfo, {
+                ImageTransparency = Hovered and 0.2 or 0.5,
+            }):Play()
+        end
+        table.insert(Dropdown.Connections, DisplayContainer.MouseEnter:Connect(function()
+            SetFieldHover(true)
+        end))
+        table.insert(Dropdown.Connections, DisplayContainer.MouseLeave:Connect(function()
+            SetFieldHover(false)
+        end))
 
         local SearchBox
         if Info.Searchable then
@@ -8566,8 +8879,8 @@ do
                 BackgroundTransparency = 1,
                 PlaceholderText = "Search...",
                 Position = UDim2.fromOffset(-8, 0),
-                Size = UDim2.new(1, -12, 1, 0),
-                TextSize = 14,
+                Size = UDim2.new(1, 6, 1, 0),
+                TextSize = 12,
                 TextXAlignment = Enum.TextXAlignment.Left,
                 Visible = false,
                 Parent = DisplayButton,
@@ -8630,14 +8943,20 @@ do
                 return UDim2.fromOffset((DisplayContainer.AbsoluteSize.X / Library.DPIScale), 0)
             end,
             function()
-                return { 0.5, DisplayContainer.AbsoluteSize.Y + 1.5 }
+                return { 0.5, DisplayContainer.AbsoluteSize.Y + 4 }
             end,
             2,
             function(Active: boolean)
+                DropdownOpen = Active
                 DisplayButton.TextTransparency = (Active and SearchBox) and 1 or 0
 
-                ArrowImage.ImageTransparency = Active and 0 or 0.5
-                ArrowImage.Rotation = Active and 180 or 0
+                TweenService:Create(ArrowImage, Library.GlideTweenInfo, {
+                    ImageTransparency = Active and 0 or 0.5,
+                    Rotation = Active and 0 or 180,
+                }):Play()
+                TweenService:Create(DisplayStroke, Library.HoverTweenInfo, {
+                    Color = Active and Library:GetLighterColor(Library.Scheme.OutlineColor) or Library.Scheme.OutlineColor,
+                }):Play()
 
                 if SearchBox then
                     SearchBox.Text = ""
@@ -8645,17 +8964,16 @@ do
                 end
 
                 local Half = UDim.new(0, Library.CornerRadius / 2)
-                local Zero = UDim.new(0, 0)
 
                 DropdownCorner.TopLeftRadius = Half
                 DropdownCorner.TopRightRadius = Half
-                DropdownCorner.BottomRightRadius = Active and Zero or Half
-                DropdownCorner.BottomLeftRadius = Active and Zero or Half
+                DropdownCorner.BottomRightRadius = Half
+                DropdownCorner.BottomLeftRadius = Half
 
                 local MenuCorner = MenuTable and MenuTable.Corner
                 if MenuCorner then
-                    MenuCorner.TopLeftRadius = Zero
-                    MenuCorner.TopRightRadius = Zero
+                    MenuCorner.TopLeftRadius = Half
+                    MenuCorner.TopRightRadius = Half
                     MenuCorner.BottomRightRadius = Half
                     MenuCorner.BottomLeftRadius = Half
                 end
@@ -8666,7 +8984,7 @@ do
         )
         Dropdown.Menu = MenuTable
 
-        local ItemHeight = 21
+        local ItemHeight = 22
         local PoolSize = math.max(1, Info.MaxVisibleDropdownItems + 2)
         local Pool = {}
         local FilteredEntries = {}
@@ -9047,14 +9365,15 @@ do
                 BackgroundTransparency = 1,
                 Size = UDim2.new(1, 0, 0, ItemHeight),
                 Text = "",
-                TextSize = 14,
+                TextSize = 12,
                 TextTransparency = 0.5,
+                TextTruncate = Enum.TextTruncate.AtEnd,
                 TextXAlignment = Enum.TextXAlignment.Left,
                 Parent = Container,
             })
             New("UIPadding", {
-                PaddingLeft = UDim.new(0, 7),
-                PaddingRight = UDim.new(0, 7),
+                PaddingLeft = UDim.new(0, 9),
+                PaddingRight = UDim.new(0, 9),
                 Parent = Button,
             })
 
@@ -9130,11 +9449,11 @@ do
                     return
                 end
 
-                TweenService:Create(Container, Library.TweenInfo, {
-                    BackgroundTransparency = 0.85,
+                TweenService:Create(Container, Library.HoverTweenInfo, {
+                    BackgroundTransparency = 0.6,
                 }):Play()
-                TweenService:Create(Button, Library.TweenInfo, {
-                    TextTransparency = 0.25,
+                TweenService:Create(Button, Library.HoverTweenInfo, {
+                    TextTransparency = 0.15,
                 }):Play()
 
                 if Image then
@@ -9423,7 +9742,7 @@ do
 
         function Dropdown:SetText(Text: string)
             Dropdown.Text = Text
-            Holder.Size = UDim2.new(1, 0, 0, Text and 39 or 21)
+            Holder.Size = UDim2.new(1, 0, 0, Text and 41 or 23)
 
             Label.Text = Text and Text or ""
             Label.Visible = not not Text
