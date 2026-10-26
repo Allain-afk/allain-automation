@@ -10,14 +10,13 @@ local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
 local Options = Library.Options
 local Toggles = Library.Toggles
 
-Library.ForceCheckbox = false -- Forces AddToggle to AddCheckbox
 Library.ShowToggleFrameInKeybinds = true -- Make toggle keybinds work inside the keybinds UI (aka adds a toggle to the UI). Good for mobile users (Default value = true)
 
 local Window = Library:CreateWindow({
 	-- Set Center to true if you want the menu to appear in the center
 	-- Set AutoShow to true if you want the menu to appear when it is created
 	-- Set Resizable to true if you want to have in-game resizable Window
-	-- Set MobileButtonsSide to "Left" or "Right" if you want the ui toggle & lock buttons to be on the left or right side of the window
+	-- Set MobileButtonsSide to "Left" or "Right" to choose which side the round menu button starts on
 	-- Set AlwaysOnTop to true if you want the menu to render above Roblox core blur (executor only)
 	-- NotifySide = Changes the side of the notifications (Left, Right) (Default value = Left)
 	-- Position and Size are also valid options here
@@ -735,6 +734,13 @@ MenuGroup:AddToggle("KeybindMenuVisibilityControl", {
 	Text = "Keybind Menu Visibility",
 	Callback = function(value)
 		Library.KeybindMenu:SetVisibilityControl(value)
+	end,
+})
+MenuGroup:AddToggle("ShowToggleButton", {
+	Text = "Toggle Button",
+	Default = Library.IsMobile,
+	Callback = function(Value)
+		Library:SetToggleButtonVisible(Value)
 	end,
 })
 MenuGroup:AddToggle("AlwaysOnTop", {

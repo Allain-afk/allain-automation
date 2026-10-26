@@ -257,7 +257,6 @@ local Library = {
     ShowToggleFrameInKeybinds = true,
 
     NotifyOnError = false,
-    ForceCheckbox = false,
 
     CantDragForced = false,
     DraggableElements = {},
@@ -407,6 +406,8 @@ local Templates = {
 
         ShowMobileButtons = true,
         MobileButtonsSide = "Left",
+        ShowToggleButton = nil, --// nil = shown on mobile only
+        ToggleButtonIcon = "layout-grid",
 
         UnlockMouseWhileOpen = true,
 
@@ -7439,301 +7440,9 @@ do
         return Toggle
     end
 
+    --// Toggles always render as checkboxes; AddToggle stays as the familiar entry point
     function Funcs:AddToggle(Idx, Info)
-        if self.Destroyed then return nil end
-
-        if Library.ForceCheckbox then
-            return Funcs.AddCheckbox(self, Idx, Info)
-        end
-
-        Info = Library:Validate(Info, Templates.Toggle)
-
-        local Groupbox = self
-        local Container = Groupbox.Container
-
-        local Toggle = {
-            Connections = {},
-            Destroyed = false,
-
-            Text = Info.Text,
-            Value = Info.Default,
-
-            Tooltip = Info.Tooltip,
-            DisabledTooltip = Info.DisabledTooltip,
-            TooltipTable = nil,
-
-            Callback = Info.Callback,
-            Changed = Info.Changed,
-
-            Risky = Info.Risky,
-            Disabled = Info.Disabled,
-            Visible = Info.Visible,
-
-            Addons = {},
-            AnyKeyPickerPicking = false,
-
-            Variant = "Switch",
-            Type = "Toggle",
-
-            Parent = Groupbox,
-        }
-
-        local Button = New("TextButton", {
-            Active = not Toggle.Disabled,
-            BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, 18),
-            Text = "",
-            Visible = Toggle.Visible,
-            Parent = Container,
-        })
-
-        local Label = New("TextLabel", {
-            BackgroundTransparency = 1,
-            Size = UDim2.new(1, -36, 1, 0),
-            Text = Toggle.Text,
-            TextSize = 13,
-            TextTransparency = 0.45,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            Parent = Button,
-        })
-
-        New("UIListLayout", {
-            FillDirection = Enum.FillDirection.Horizontal,
-            HorizontalAlignment = Enum.HorizontalAlignment.Right,
-            Padding = UDim.new(0, 6),
-            Parent = Label,
-        })
-
-        local Switch = New("Frame", {
-            AnchorPoint = Vector2.new(1, 0.5),
-            BackgroundColor3 = "ToggleOffColor",
-            Position = UDim2.fromScale(1, 0.5),
-            Size = UDim2.fromOffset(28, 16),
-            Parent = Button,
-        })
-        New("UICorner", {
-            CornerRadius = UDim.new(1, 0),
-            Parent = Switch,
-        })
-        New("UIPadding", {
-            PaddingBottom = UDim.new(0, 2),
-            PaddingLeft = UDim.new(0, 2),
-            PaddingRight = UDim.new(0, 2),
-            PaddingTop = UDim.new(0, 2),
-            Parent = Switch,
-        })
-        local SwitchStroke = New("UIStroke", {
-            Color = "OutlineColor",
-            Parent = Switch,
-        })
-
-        local Ball = New("Frame", {
-            BackgroundColor3 = "MutedFontColor",
-            Size = UDim2.fromScale(1, 1),
-            SizeConstraint = Enum.SizeConstraint.RelativeYY,
-            Parent = Switch,
-        })
-        New("UICorner", {
-            CornerRadius = UDim.new(1, 0),
-            Parent = Ball,
-        })
-        local SwitchScale = New("UIScale", {
-            Parent = Switch,
-        })
-
-        local Interaction = BindInteraction(Button, {
-            Scale = SwitchScale,
-            PressScale = 0.92,
-            Enabled = function()
-                return not Toggle.Disabled
-            end,
-            OnHover = function()
-                (Toggle :: any):Display()
-            end,
-        })
-
-        function Toggle:UpdateColors()
-            Toggle:Display()
-        end
-
-        function Toggle:Display()
-            if Library.Unloaded then
-                return
-            end
-
-            local Offset = Toggle.Value and 1 or 0
-            local Track = Toggle.Value and "AccentColor" or "ToggleOffColor"
-            local Edge = Toggle.Value and "AccentColor" or "OutlineColor"
-            local Knob = Toggle.Value and "BackgroundColor" or "MutedFontColor"
-
-            Library.Registry[Switch].BackgroundColor3 = Track
-            Library.Registry[SwitchStroke].Color = Edge
-            Library.Registry[Ball].BackgroundColor3 = Knob
-
-            if Toggle.Disabled then
-                Label.TextTransparency = 0.8
-                Ball.AnchorPoint = Vector2.new(Offset, 0)
-                Ball.Position = UDim2.fromScale(Offset, 0)
-
-                Switch.BackgroundColor3 = GetSchemeValue(Track)
-                Switch.BackgroundTransparency = 0.6
-                SwitchStroke.Color = GetSchemeValue(Edge)
-                SwitchStroke.Transparency = 0.6
-                Ball.BackgroundColor3 = GetSchemeValue(Knob)
-
-                return
-            end
-
-            local Hovering = Interaction.IsHovering()
-
-            TweenService:Create(Label, Library.HoverTweenInfo, {
-                TextTransparency = if Toggle.Value then 0 elseif Hovering then 0.2 else 0.45,
-            }):Play()
-            TweenService:Create(Switch, Library.HoverTweenInfo, {
-                BackgroundColor3 = GetSchemeValue(Track),
-                BackgroundTransparency = 0,
-            }):Play()
-            TweenService:Create(SwitchStroke, Library.HoverTweenInfo, {
-                Color = if not Toggle.Value and Hovering then Library:GetLighterColor(Library.Scheme.OutlineColor) else GetSchemeValue(Edge),
-                Transparency = 0,
-            }):Play()
-            TweenService:Create(Ball, Library.GlideTweenInfo, {
-                AnchorPoint = Vector2.new(Offset, 0),
-                Position = UDim2.fromScale(Offset, 0),
-                BackgroundColor3 = GetSchemeValue(Knob),
-            }):Play()
-        end
-
-        function Toggle:OnChanged(Func)
-            Toggle.Changed = Func
-        end
-
-        function Toggle:RunChanged()
-            if Toggle.Disabled then
-                return
-            end
-
-            Library:SafeCallback(Toggle.Callback, Toggle.Value)
-            Library:SafeCallback(Toggle.Changed, Toggle.Value)
-        end
-
-        function Toggle:SetValue(Value)
-            Toggle.Value = Value
-            Toggle:Display()
-
-            for _, Addon in Toggle.Addons do
-                if Addon.Type == "KeyPicker" and Addon.SyncToggleState then
-                    Addon.Toggled = Toggle.Value
-                    Addon:Update()
-                end
-            end
-
-            if not Toggle.Disabled then
-                Library:UpdateDependencyBoxes()
-            end
-
-            if not Toggle.AnyKeyPickerPicking then
-                Toggle:RunChanged()
-            end
-        end
-
-        function Toggle:SetDisabled(Disabled: boolean)
-            Toggle.Disabled = Disabled
-
-            if Toggle.TooltipTable then
-                Toggle.TooltipTable.Disabled = Toggle.Disabled
-            end
-
-            Library:UpdateAddons(Toggle)
-
-            Button.Active = not Toggle.Disabled
-            Toggle:Display()
-
-            Library:UpdateDependencyBoxes()
-        end
-
-        function Toggle:SetVisible(Visible: boolean)
-            Toggle.Visible = Visible
-
-            Button.Visible = Toggle.Visible
-            Groupbox:Resize()
-        end
-
-        function Toggle:SetText(Text: string)
-            Toggle.Text = Text
-            Label.Text = Text
-        end
-
-        table.insert(Toggle.Connections, Button.MouseButton1Click:Connect(function()
-            if Toggle.Disabled then
-                return
-            end
-
-            Toggle:SetValue(not Toggle.Value)
-        end))
-
-        if typeof(Toggle.Tooltip) == "string" or typeof(Toggle.DisabledTooltip) == "string" then
-            Toggle.TooltipTable = Library:AddTooltip(Toggle.Tooltip, Toggle.DisabledTooltip, Button)
-            Toggle.TooltipTable.Disabled = Toggle.Disabled
-        end
-
-        if Toggle.Risky then
-            Label.TextColor3 = Library.Scheme.RedColor
-            Library.Registry[Label].TextColor3 = "RedColor"
-        end
-
-        Toggle:Display()
-        Groupbox:Resize()
-
-        Toggle.TextLabel = Label
-        Toggle.Container = Container
-        setmetatable(Toggle, BaseAddons)
-
-        Toggle.Holder = Button
-        table.insert(Groupbox.Elements, Toggle)
-
-        Toggle.Default = Toggle.Value
-
-        Toggles[Idx] = Toggle
-
-        function Toggle:Destroy()
-            Toggle.Destroyed = true
-
-            if Toggle.Connections then
-                for _, Connection in Toggle.Connections do
-                    Connection:Disconnect()
-                end
-            end
-
-            if Toggle.TooltipTable then
-                Toggle.TooltipTable:Destroy()
-            end
-
-            Interaction.Disconnect()
-
-            if Button then
-                Button:Destroy()
-            end
-
-            if Toggle.Addons then
-                for Index = #Toggle.Addons, 1, -1 do
-                    local Addon = table.remove(Toggle.Addons, Index)
-                    if Addon and Addon.Destroy then
-                        Addon:Destroy()
-                    end
-                end
-            end
-
-            local ElemIdx = table.find(Groupbox.Elements, Toggle)
-            if ElemIdx then
-                table.remove(Groupbox.Elements, ElemIdx)
-            end
-
-            Groupbox:Resize()
-            Toggles[Idx] = nil
-        end
-
-        return Toggle
+        return Funcs.AddCheckbox(self, Idx, Info)
     end
 
     function Funcs:AddInput(Idx, Info)
@@ -15010,34 +14719,108 @@ function Library:CreateWindow(WindowInfo)
         task.spawn(Library.Toggle)
     end
 
-    if Library.IsMobile then
-        local ToggleButton = Library:AddDraggableButton("Toggle", function()
+    --// Floating round button that opens/closes the menu; draggable, works with touch and mouse
+    do
+        local ShowToggleButton = WindowInfo.ShowToggleButton
+        if ShowToggleButton == nil then
+            ShowToggleButton = Library.IsMobile and WindowInfo.ShowMobileButtons ~= false
+        end
+
+        local OnRight = WindowInfo.MobileButtonsSide == "Right"
+        local ToggleButton = New("ImageButton", {
+            AnchorPoint = Vector2.new(if OnRight then 1 else 0, 0.5),
+            BackgroundColor3 = "BackgroundColor",
+            Position = if OnRight then UDim2.new(1, -14, 0.5, 0) else UDim2.new(0, 14, 0.5, 0),
+            Size = UDim2.fromOffset(44, 44),
+            Visible = ShowToggleButton == true,
+            ZIndex = 1,
+            Parent = Floats,
+        })
+        New("UICorner", {
+            CornerRadius = UDim.new(1, 0),
+            Parent = ToggleButton,
+        })
+        local ToggleButtonStroke = New("UIStroke", {
+            Color = "OutlineColor",
+            Parent = ToggleButton,
+        })
+        table.insert(
+            Library.Scales,
+            New("UIScale", {
+                Parent = ToggleButton,
+            })
+        )
+
+        local MenuIcon = Library:GetCustomIcon(WindowInfo.ToggleButtonIcon)
+        local ToggleIcon = New("ImageLabel", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            ImageColor3 = "FontColor",
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromOffset(20, 20),
+            Parent = ToggleButton,
+        })
+        if MenuIcon then
+            Library:ApplyLucideIcon(ToggleIcon, MenuIcon)
+        end
+
+        Library:MakeDraggable(ToggleButton, ToggleButton, true)
+        if not table.find(Library.DraggableElements, ToggleButton) then
+            table.insert(Library.DraggableElements, ToggleButton)
+        end
+
+        --// A press that turned into a drag shouldn't also toggle the menu
+        local PressPosition
+        ToggleButton.InputBegan:Connect(function(Input: InputObject)
+            if IsClickInput(Input) then
+                PressPosition = ToggleButton.AbsolutePosition
+                TweenService:Create(ToggleIcon, Library.PressTweenInfo, {
+                    Size = UDim2.fromOffset(17, 17),
+                }):Play()
+            end
+        end)
+        ToggleButton.InputEnded:Connect(function(Input: InputObject)
+            if IsClickInput(Input) then
+                TweenService:Create(ToggleIcon, Library.GlideTweenInfo, {
+                    Size = UDim2.fromOffset(20, 20),
+                }):Play()
+            end
+        end)
+        ToggleButton.Activated:Connect(function()
+            if PressPosition and (ToggleButton.AbsolutePosition - PressPosition).Magnitude > 6 then
+                return
+            end
+
             Library:Toggle()
-        end, true)
+        end)
 
-        local LockButton = Library:AddDraggableButton("Lock", function(self)
-            Library.CantDragForced = not Library.CantDragForced
-            self:SetText(Library.CantDragForced and "Unlock" or "Lock")
-        end, true)
+        ToggleButton.MouseEnter:Connect(function()
+            TweenService:Create(ToggleButton, Library.HoverTweenInfo, {
+                BackgroundColor3 = GetSchemeValue("HoverColor"),
+            }):Play()
+            TweenService:Create(ToggleButtonStroke, Library.HoverTweenInfo, {
+                Color = Library:GetLighterColor(Library.Scheme.OutlineColor),
+            }):Play()
+        end)
+        ToggleButton.MouseLeave:Connect(function()
+            TweenService:Create(ToggleButton, Library.HoverTweenInfo, {
+                BackgroundColor3 = Library.Scheme.BackgroundColor,
+            }):Play()
+            TweenService:Create(ToggleButtonStroke, Library.HoverTweenInfo, {
+                Color = Library.Scheme.OutlineColor,
+            }):Play()
+        end)
 
-        if WindowInfo.MobileButtonsSide == "Right" then
-            ToggleButton.Button.AnchorPoint = Vector2.new(1, 0)
-            ToggleButton.Button.Position = UDim2.new(1, -6, 0, 6)
+        Library.ToggleButton = ToggleButton
+        WindowInfo.ShowToggleButton = ShowToggleButton == true
+    end
 
-            LockButton.Button.AnchorPoint = Vector2.new(1, 0)
-            LockButton.Button.Position = UDim2.new(1, -(ToggleButton.Button.Size.X.Offset + 12), 0, 6)
-        else
-            ToggleButton.Button.AnchorPoint = Vector2.new(0, 0)
-            ToggleButton.Button.Position = UDim2.fromOffset(6, 6)
+    function Window:SetToggleButtonVisible(Visible: boolean)
+        WindowInfo.ShowToggleButton = Visible == true
+        Library.ToggleButton.Visible = WindowInfo.ShowToggleButton
+    end
 
-            LockButton.Button.AnchorPoint = Vector2.new(0, 0)
-            LockButton.Button.Position = UDim2.fromOffset(ToggleButton.Button.Size.X.Offset + 12, 6)
-        end
-
-        if WindowInfo.ShowMobileButtons == false then
-            ToggleButton.Button.Visible = false
-            LockButton.Button.Visible = false
-        end
+    function Library:SetToggleButtonVisible(Visible: boolean)
+        Window:SetToggleButtonVisible(Visible)
     end
 
     --// Execution \\--
