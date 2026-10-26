@@ -217,7 +217,10 @@ local Library = {
     SpecificCorners = {},
 
     --// Animations \\--
-    TweenInfo = TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+    TweenInfo = TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+    HoverTweenInfo = TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+    PressTweenInfo = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+    GlideTweenInfo = TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
 
     TabTransitionInfo = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
     TabSwipeOffset = 26,
@@ -271,17 +274,18 @@ local Library = {
     OriginalMinSize = Vector2.new(480, 360),
     MinSize = Vector2.new(480, 360),
     DPIScale = 1,
-    CornerRadius = 4,
+    CornerRadius = 6,
 
     --// Scheme \\--
+    --// SurfaceColor, MutedFontColor, FontMedium, FontBold are derived from these when a theme omits them
     IsLightTheme = false,
     Scheme = {
-        BackgroundColor = Color3.fromRGB(15, 15, 15),
-        MainColor = Color3.fromRGB(25, 25, 25),
-        AccentColor = Color3.fromRGB(125, 85, 255),
-        OutlineColor = Color3.fromRGB(40, 40, 40),
-        FontColor = Color3.new(1, 1, 1),
-        Font = Font.fromEnum(Enum.Font.Code),
+        BackgroundColor = Color3.fromRGB(14, 14, 15),
+        MainColor = Color3.fromRGB(26, 26, 28),
+        AccentColor = Color3.fromRGB(232, 232, 236),
+        OutlineColor = Color3.fromRGB(36, 36, 39),
+        FontColor = Color3.fromRGB(236, 236, 240),
+        Font = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Medium),
 
         RedColor = Color3.fromRGB(255, 50, 50),
         DestructiveColor = Color3.fromRGB(220, 38, 38),
@@ -376,8 +380,8 @@ local Templates = {
         Footer = "No Footer",
 
         Position = UDim2.fromOffset(6, 6),
-        Size = UDim2.fromOffset(720, 600),
-        IconSize = UDim2.fromOffset(30, 30),
+        Size = UDim2.fromOffset(580, 640),
+        IconSize = UDim2.fromOffset(18, 18),
 
         AutoShow = true,
         Center = true,
@@ -393,11 +397,11 @@ local Templates = {
         SearchbarSize = UDim2.fromScale(1, 1),
         GlobalSearch = false,
 
-        CornerRadius = 4,
+        CornerRadius = 6,
         NotifySide = "Right",
         ShowCustomCursor = true,
 
-        Font = Enum.Font.Code,
+        Font = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Medium),
         ToggleKeybind = Enum.KeyCode.RightControl,
 
         ShowMobileButtons = true,
@@ -645,6 +649,27 @@ local SchemeAlias = {
     Dark = "DarkColor"
 }
 
+local function WithWeight(Weight: Enum.FontWeight): Font
+    local Base = Library.Scheme.Font
+    return Font.new(Base.Family, Weight, Base.Style)
+end
+
+--// Tones themes don't have to define; computed from the core colors so any palette works
+local SchemeDerived = {
+    SurfaceColor = function()
+        return Library.Scheme.BackgroundColor:Lerp(Library.Scheme.MainColor, 0.3)
+    end,
+    MutedFontColor = function()
+        return Library.Scheme.FontColor:Lerp(Library.Scheme.BackgroundColor, 0.45)
+    end,
+    FontMedium = function()
+        return WithWeight(Enum.FontWeight.SemiBold)
+    end,
+    FontBold = function()
+        return WithWeight(Enum.FontWeight.Bold)
+    end,
+}
+
 local function GetSchemeValue(Index)
     if not Index then
         return nil
@@ -664,7 +689,12 @@ local function GetSchemeValue(Index)
         return Library.Scheme[AliasIndex]
     end
 
-    return Library.Scheme[Index]
+    local Value = Library.Scheme[Index]
+    if Value == nil and typeof(Index) == "string" and SchemeDerived[Index] then
+        return SchemeDerived[Index]()
+    end
+
+    return Value
 end
 
 --// Basic Functions \\--
@@ -1919,7 +1949,7 @@ do
 end
 
 --// Icons \\--
-local CheckIcon, ArrowIcon, ResizeIcon, KeyIcon, MoveIcon, PopOutIcon, CloseIcon, SettingsIcon
+local CheckIcon, ArrowIcon, ResizeIcon, KeyIcon, PopOutIcon, CloseIcon, SettingsIcon
 function Library:SetIconModule(module: IconModule)
     FetchIcons = true
     Icons = module
@@ -1928,7 +1958,6 @@ function Library:SetIconModule(module: IconModule)
     ArrowIcon = Library:GetIcon("chevron-up")
     ResizeIcon = Library:GetIcon("move-diagonal-2")
     KeyIcon = Library:GetIcon("key")
-    MoveIcon = Library:GetIcon("move")
     PopOutIcon = Library:GetIcon("square-arrow-down-left")
     CloseIcon = Library:GetIcon("x")
     SettingsIcon = Library:GetIcon("settings")
@@ -2562,6 +2591,7 @@ function Library:AddOutline(Frame: GuiObject)
     local ShadowStroke = New("UIStroke", {
         Color = "DarkColor",
         Thickness = 1.5,
+        Transparency = 0.65,
         ZIndex = 1,
         Parent = Frame,
     })
@@ -11056,7 +11086,7 @@ function Library:CreateWindow(WindowInfo)
 
     Library.OriginalMinSize =
         Vector2.new(math.min(Library.OriginalMinSize.X, MaxX), math.min(Library.OriginalMinSize.Y, MaxY))
-    Library.MinSize = Vector2.new(math.min(WindowInfo.MinContainerWidth, MaxX), Library.OriginalMinSize.Y)
+    Library.MinSize = Vector2.new(math.min(Library.OriginalMinSize.X, MaxX), Library.OriginalMinSize.Y)
 
     WindowInfo.Size = UDim2.fromOffset(
         math.clamp(WindowInfo.Size.X.Offset, Library.MinSize.X, MaxX),
@@ -11068,6 +11098,14 @@ function Library:CreateWindow(WindowInfo)
     WindowInfo.CornerRadius = math.min(WindowInfo.CornerRadius, 20)
 
     local TabButtonsStyle = WindowInfo.TabButtonsStyle
+
+    --// Shell layout: header, tab strip, content, footer
+    local WindowPadding = 10
+    local HeaderHeight = 44
+    local TabBarHeight = 30
+    local FooterHeight = 28
+    local SearchWidth = 150
+    local ContentTop = HeaderHeight + TabBarHeight + 8
 
     --// Old Naming \\--
     if WindowInfo.Compact ~= nil then
@@ -11099,7 +11137,6 @@ function Library:CreateWindow(WindowInfo)
     Library.TabSwipeOffset = math.max(1, WindowInfo.TabSwipeOffset or 26)
     Library.TabSwipeFrom = WindowInfo.TabSwipeFrom or "right"
 
-    local IsDefaultSearchbarSize = WindowInfo.SearchbarSize == UDim2.fromScale(1, 1)
     local MainFrame
     local DividerLine
     local TitleHolder
@@ -11126,9 +11163,6 @@ function Library:CreateWindow(WindowInfo)
         AvoidCoreGui = WindowInfo.SnapAvoidCoreGui,
     }
 
-    local InitialLeftWidth = math.ceil(WindowInfo.Size.X.Offset * 0.3)
-    local IsCompact = WindowInfo.SidebarCompacted
-    local LastExpandedWidth = InitialLeftWidth
     local RefreshWindowTitleSize
 
     do
@@ -11381,9 +11415,7 @@ function Library:CreateWindow(WindowInfo)
         Library.KeybindMenu = KeybindMenu
 
         MainFrame = New("TextButton", {
-            BackgroundColor3 = function()
-                return Library:GetBetterColor(Library.Scheme.BackgroundColor, -1)
-            end,
+            BackgroundColor3 = "BackgroundColor",
             Name = "Main",
             Text = "",
             Position = WindowInfo.Position,
@@ -11405,17 +11437,13 @@ function Library:CreateWindow(WindowInfo)
             })
         )
         Library:AddOutline(MainFrame)
-        Library:MakeLine(MainFrame, {
-            Position = UDim2.fromOffset(0, 48),
-            Size = UDim2.new(1, 0, 0, 1),
-        })
 
+        --// The sidebar divider only exists so sidebar APIs keep working; tabs live in the top bar
         DividerLine = New("Frame", {
             BackgroundColor3 = "OutlineColor",
-            Position = UDim2.fromOffset(InitialLeftWidth, 0),
-            Size = UDim2.new(0, 1, 1, -21),
+            Size = UDim2.fromOffset(0, 0),
+            Visible = false,
             Parent = MainFrame,
-            ZIndex = 2
         })
 
         local BackgroundIcon = Library:GetCustomIcon(WindowInfo.BackgroundImage)
@@ -11472,7 +11500,7 @@ function Library:CreateWindow(WindowInfo)
         --// Top Bar \\-
         TopBar = New("Frame", {
             BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, 48),
+            Size = UDim2.new(1, 0, 0, HeaderHeight),
             Parent = MainFrame,
         })
         Library:MakeDraggable(MainFrame, TopBar, false, true, WindowSnapConfig)
@@ -11480,14 +11508,15 @@ function Library:CreateWindow(WindowInfo)
         --// Title \\--
         TitleHolder = New("Frame", {
             BackgroundTransparency = 1,
-            Size = UDim2.new(0, InitialLeftWidth, 1, 0),
+            Position = UDim2.fromOffset(WindowPadding + 2, 0),
+            Size = UDim2.new(1, -SearchWidth - WindowPadding * 3, 1, 0),
             Parent = TopBar,
         })
         New("UIListLayout", {
             FillDirection = Enum.FillDirection.Horizontal,
-            HorizontalAlignment = Enum.HorizontalAlignment.Center,
+            HorizontalAlignment = Enum.HorizontalAlignment.Left,
             VerticalAlignment = Enum.VerticalAlignment.Center,
-            Padding = UDim.new(0, 6),
+            Padding = UDim.new(0, 7),
             Parent = TitleHolder,
         })
 
@@ -11513,23 +11542,40 @@ function Library:CreateWindow(WindowInfo)
 
         WindowTitle = New("TextLabel", {
             BackgroundTransparency = 1,
+            FontFace = "FontBold",
+            LayoutOrder = 1,
             Size = UDim2.fromOffset(0, 0),
             Text = WindowInfo.Title,
-            TextSize = 20,
+            TextSize = 14,
             TextTruncate = Enum.TextTruncate.AtEnd,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextYAlignment = Enum.TextYAlignment.Center,
             Parent = TitleHolder,
         })
 
+        --// Current tab name, shown as a muted subtitle next to the title
+        CurrentTabLabel = New("TextLabel", {
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundTransparency = 1,
+            FontFace = "FontMedium",
+            LayoutOrder = 2,
+            Size = UDim2.fromScale(0, 1),
+            Text = "",
+            TextColor3 = "MutedFontColor",
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = TitleHolder,
+        })
+
         RefreshWindowTitleSize = function()
             local IconWidth = 0
             if WindowIcon and WindowIcon.Visible then
-                IconWidth = WindowIcon.Size.X.Offset + 6
+                IconWidth = WindowIcon.Size.X.Offset + 7
             end
 
-            local MaxWidth = math.max(0, (TitleHolder.AbsoluteSize.X / Library.DPIScale) - IconWidth - 12)
-            local NaturalWidth = Library:GetTextBounds(WindowTitle.Text, Library.Scheme.Font, WindowTitle.TextSize)
+            local SubtitleWidth = CurrentTabLabel.Text ~= "" and (CurrentTabLabel.AbsoluteSize.X / Library.DPIScale) + 7 or 0
+            local MaxWidth = math.max(0, (TitleHolder.AbsoluteSize.X / Library.DPIScale) - IconWidth - SubtitleWidth)
+            local NaturalWidth = Library:GetTextBounds(WindowTitle.Text, WindowTitle.FontFace, WindowTitle.TextSize)
             WindowTitle.Size = UDim2.new(0, math.min(NaturalWidth, MaxWidth), 1, 0)
         end
         RefreshWindowTitleSize()
@@ -11538,79 +11584,34 @@ function Library:CreateWindow(WindowInfo)
         RightWrapper = New("Frame", {
             AnchorPoint = Vector2.new(1, 0.5),
             BackgroundTransparency = 1,
-            Position = UDim2.new(1, -49, 0.5, 0),
-            Size = UDim2.new(1, -InitialLeftWidth - 57 - 1, 1, -16),
+            Position = UDim2.new(1, -WindowPadding, 0.5, 0),
+            Size = UDim2.fromOffset(SearchWidth, 26),
             Parent = TopBar,
         })
 
-        New("UIListLayout", {
-            FillDirection = Enum.FillDirection.Horizontal,
-            HorizontalAlignment = Enum.HorizontalAlignment.Left,
-            VerticalAlignment = Enum.VerticalAlignment.Center,
-            Padding = UDim.new(0, 8),
-            Parent = RightWrapper,
-        })
-
+        --// Tab descriptions now surface as tooltips; these stay for API compatibility
         CurrentTabInfo = New("Frame", {
-            Size = UDim2.fromScale(WindowInfo.DisableSearch and 1 or 0.5, 1),
-            Visible = false,
             BackgroundTransparency = 1,
+            Size = UDim2.fromScale(0, 0),
+            Visible = false,
             Parent = RightWrapper,
         })
-
-        New("UIFlexItem", {
-            FlexMode = Enum.UIFlexMode.Grow,
-            Parent = CurrentTabInfo,
-        })
-
-        New("UIListLayout", {
-            FillDirection = Enum.FillDirection.Vertical,
-            HorizontalAlignment = Enum.HorizontalAlignment.Left,
-            VerticalAlignment = Enum.VerticalAlignment.Center,
-            Parent = CurrentTabInfo,
-        })
-
-        New("UIPadding", {
-            PaddingBottom = UDim.new(0, 8),
-            PaddingLeft = UDim.new(0, 8),
-            PaddingRight = UDim.new(0, 8),
-            PaddingTop = UDim.new(0, 8),
-            Parent = CurrentTabInfo,
-        })
-
-        CurrentTabLabel = New("TextLabel", {
-            BackgroundTransparency = 1,
-            Size = UDim2.fromScale(1, 0),
-            AutomaticSize = Enum.AutomaticSize.Y,
-            Text = "",
-            TextSize = 14,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            Parent = CurrentTabInfo,
-        })
-
         CurrentTabDescription = New("TextLabel", {
             BackgroundTransparency = 1,
-            Size = UDim2.fromScale(1, 0),
-            AutomaticSize = Enum.AutomaticSize.Y,
             Text = "",
-            TextWrapped = true,
-            TextSize = 14,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            TextTransparency = 0.5,
             Parent = CurrentTabInfo,
         })
 
         SearchBox = New("TextBox", {
             BackgroundColor3 = "MainColor",
+            BackgroundTransparency = 0.4,
+            ClearTextOnFocus = false,
             PlaceholderText = "Search",
-            Size = WindowInfo.SearchbarSize,
-            TextScaled = true,
+            Size = UDim2.fromScale(1, 1),
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
             Visible = not (WindowInfo.DisableSearch or false),
             Parent = RightWrapper,
-        })
-        New("UIFlexItem", {
-            FlexMode = Enum.UIFlexMode.Shrink,
-            Parent = SearchBox,
         })
         table.insert(
             Library.Corners,
@@ -11620,10 +11621,8 @@ function Library:CreateWindow(WindowInfo)
             })
         )
         New("UIPadding", {
-            PaddingBottom = UDim.new(0, 8),
-            PaddingLeft = UDim.new(0, 8),
+            PaddingLeft = UDim.new(0, 28),
             PaddingRight = UDim.new(0, 8),
-            PaddingTop = UDim.new(0, 8),
             Parent = SearchBox,
         })
         local SearchBoxStroke = New("UIStroke", {
@@ -11633,104 +11632,110 @@ function Library:CreateWindow(WindowInfo)
 
         Library:GiveSignal(SearchBox.Focused:Connect(function()
             Library.Registry[SearchBoxStroke].Color = "AccentColor"
-            TweenService:Create(SearchBoxStroke, Library.TweenInfo, {
+            TweenService:Create(SearchBoxStroke, Library.HoverTweenInfo, {
                 Color = Library.Scheme.AccentColor,
+                Transparency = 0.5,
+            }):Play()
+            TweenService:Create(SearchBox, Library.HoverTweenInfo, {
+                BackgroundTransparency = 0,
             }):Play()
         end))
 
         Library:GiveSignal(SearchBox.FocusLost:Connect(function()
             Library.Registry[SearchBoxStroke].Color = "OutlineColor"
-            TweenService:Create(SearchBoxStroke, Library.TweenInfo, {
+            TweenService:Create(SearchBoxStroke, Library.HoverTweenInfo, {
                 Color = Library.Scheme.OutlineColor,
+                Transparency = 0,
+            }):Play()
+            TweenService:Create(SearchBox, Library.HoverTweenInfo, {
+                BackgroundTransparency = 0.4,
             }):Play()
         end))
 
         local SearchIcon = Library:GetIcon("search")
         if SearchIcon then
             local SearchIconImage = New("ImageLabel", {
-                ImageColor3 = "FontColor",
-                ImageTransparency = 0.5,
-                Size = UDim2.fromScale(1, 1),
-                SizeConstraint = Enum.SizeConstraint.RelativeYY,
+                AnchorPoint = Vector2.new(0, 0.5),
+                ImageColor3 = "MutedFontColor",
+                Position = UDim2.new(0, -20, 0.5, 0),
+                Size = UDim2.fromOffset(13, 13),
                 Parent = SearchBox,
             })
             Library:ApplyLucideIcon(SearchIconImage, SearchIcon)
         end
 
-        if MoveIcon then
-            local MoveIconImage = New("ImageLabel", {
-                AnchorPoint = Vector2.new(1, 0.5),
-                ImageColor3 = "OutlineColor",
-                Position = UDim2.new(1, -10, 0.5, 0),
-                Size = UDim2.fromOffset(28, 28),
-                SizeConstraint = Enum.SizeConstraint.RelativeYY,
-                Parent = TopBar,
-            })
-            Library:ApplyLucideIcon(MoveIconImage, MoveIcon)
-        end
+        --// Tabs \\--
+        Tabs = New("ScrollingFrame", {
+            AutomaticCanvasSize = Enum.AutomaticSize.X,
+            BackgroundTransparency = 1,
+            CanvasSize = UDim2.fromScale(0, 0),
+            Position = UDim2.fromOffset(WindowPadding, HeaderHeight),
+            ScrollBarImageTransparency = 1,
+            ScrollBarThickness = 0,
+            ScrollingDirection = Enum.ScrollingDirection.X,
+            Size = UDim2.new(1, -WindowPadding * 2, 0, TabBarHeight),
+            Parent = MainFrame,
+        })
+        New("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            Padding = UDim.new(0, math.max(TabButtonsStyle.Gap, 4)),
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            Parent = Tabs,
+        })
+        New("UIPadding", {
+            PaddingLeft = UDim.new(0, 1),
+            PaddingRight = UDim.new(0, 1),
+            Parent = Tabs,
+        })
 
-        --// Bottom Bar \\--
-        local BottomClip = New("Frame", {
-            AnchorPoint = Vector2.new(0, 1),
+        --// Container \\--
+        Container = New("Frame", {
             BackgroundTransparency = 1,
             ClipsDescendants = true,
-            Position = UDim2.fromScale(0, 1),
-            Size = UDim2.new(1, 0, 0, 20),
-            ZIndex = 3,
+            Name = "Container",
+            Position = UDim2.fromOffset(WindowPadding, ContentTop),
+            Size = UDim2.new(1, -WindowPadding * 2, 1, -ContentTop - FooterHeight),
             Parent = MainFrame,
         })
 
-        BottomBackground = New("Frame", {
-            AnchorPoint = Vector2.new(0, 1),
-            BackgroundColor3 = function()
-                return Library:GetBetterColor(Library.Scheme.BackgroundColor, 4)
-            end,
-            Position = UDim2.fromScale(0, 1),
-            Size = UDim2.new(1, 0, 0, math.max(20, WindowInfo.CornerRadius * 2)),
-            ZIndex = 3,
-            Parent = BottomClip,
-        })
-        Library:MakeLine(MainFrame, {
-            AnchorPoint = Vector2.new(0, 1),
-            Position = UDim2.new(0, 0, 1, -20),
-            Size = UDim2.new(1, 0, 0, 1),
-            ZIndex = 3,
-        })
-
+        --// Bottom Bar \\--
         local BottomBar = New("Frame", {
             AnchorPoint = Vector2.new(0, 1),
             BackgroundTransparency = 1,
             Position = UDim2.fromScale(0, 1),
-            Size = UDim2.new(1, 0, 0, 20),
+            Size = UDim2.new(1, 0, 0, FooterHeight),
             ZIndex = 4,
             Parent = MainFrame,
         })
+
+        --// Kept for SetCornerRadius; the footer has no fill of its own
+        BottomBackground = New("Frame", {
+            BackgroundTransparency = 1,
+            Size = UDim2.fromOffset(0, 0),
+            Parent = BottomBar,
+        })
         BottomBackgroundCorner = New("UICorner", {
-            TopLeftRadius = UDim.new(0, 0),
-            TopRightRadius = UDim.new(0, 0),
-            BottomLeftRadius = UDim.new(0, WindowInfo.CornerRadius),
-            BottomRightRadius = UDim.new(0, WindowInfo.CornerRadius),
             Parent = BottomBackground,
         })
 
         --// Footer \\-
         FooterLabel = New("TextLabel", {
             BackgroundTransparency = 1,
+            FontFace = "FontMedium",
             Size = UDim2.fromScale(1, 1),
             Text = WindowInfo.Footer,
-            TextSize = 14,
-            TextTransparency = 0.5,
+            TextColor3 = "MutedFontColor",
+            TextSize = 12,
             Parent = BottomBar,
         })
 
         --// Resize Button \\--
         if WindowInfo.Resizable then
             ResizeButton = New("TextButton", {
-                AnchorPoint = Vector2.new(1, 0),
+                AnchorPoint = Vector2.new(1, 1),
                 BackgroundTransparency = 1,
-                Position = UDim2.new(1, -WindowInfo.CornerRadius / 4, 0, 0),
-                Size = UDim2.fromScale(1, 1),
-                SizeConstraint = Enum.SizeConstraint.RelativeYY,
+                Position = UDim2.new(1, -4, 1, -4),
+                Size = UDim2.fromOffset(16, 16),
                 Text = "",
                 Parent = BottomBar,
             })
@@ -11740,61 +11745,18 @@ function Library:CreateWindow(WindowInfo)
                     Tab:Resize(true)
                 end
             end)
+
+            local WindowResizeIcon = New("ImageLabel", {
+                ImageColor3 = "MutedFontColor",
+                ImageTransparency = 0.4,
+                Position = UDim2.fromOffset(2, 2),
+                Size = UDim2.new(1, -4, 1, -4),
+                Parent = ResizeButton,
+            })
+            if ResizeIcon then
+                Library:ApplyLucideIcon(WindowResizeIcon, ResizeIcon)
+            end
         end
-
-        local WindowResizeIcon = New("ImageLabel", {
-            ImageColor3 = "FontColor",
-            ImageTransparency = 0.5,
-            Position = UDim2.fromOffset(2, 2),
-            Size = UDim2.new(1, -4, 1, -4),
-            Parent = ResizeButton,
-        })
-        if ResizeIcon then
-            Library:ApplyLucideIcon(WindowResizeIcon, ResizeIcon)
-        end
-
-        --// Tabs \\--
-        Tabs = New("ScrollingFrame", {
-            AutomaticCanvasSize = Enum.AutomaticSize.Y,
-            BackgroundColor3 = "BackgroundColor",
-            CanvasSize = UDim2.fromScale(0, 0),
-            Position = UDim2.fromOffset(0, 49),
-            ScrollBarImageTransparency = 1,
-            ScrollBarThickness = 0,
-            Size = UDim2.new(0, InitialLeftWidth, 1, -70),
-            Parent = MainFrame,
-        })
-        New("UIListLayout", {
-            Padding = UDim.new(0, TabButtonsStyle.Gap),
-            Parent = Tabs,
-        })
-        New("UIPadding", {
-            PaddingBottom = UDim.new(0, TabButtonsStyle.Padding),
-            PaddingLeft = UDim.new(0, TabButtonsStyle.Padding),
-            PaddingRight = UDim.new(0, TabButtonsStyle.Padding),
-            PaddingTop = UDim.new(0, TabButtonsStyle.Padding),
-            Parent = Tabs,
-        })
-
-        --// Container \\--
-        Container = New("Frame", {
-            AnchorPoint = Vector2.new(1, 0),
-            BackgroundColor3 = function()
-                return Library:GetBetterColor(Library.Scheme.BackgroundColor, 1)
-            end,
-            ClipsDescendants = true,
-            Name = "Container",
-            Position = UDim2.new(1, 0, 0, 49),
-            Size = UDim2.new(1, -InitialLeftWidth - 1, 1, -70),
-            Parent = MainFrame,
-        })
-        New("UIPadding", {
-            PaddingBottom = UDim.new(0, 0),
-            PaddingLeft = UDim.new(0, 6),
-            PaddingRight = UDim.new(0, 6),
-            PaddingTop = UDim.new(0, 0),
-            Parent = Container,
-        })
 
         Library.WindowContainer = Container
     end
@@ -12029,78 +11991,95 @@ function Library:CreateWindow(WindowInfo)
         end
     end
 
-    local function ApplyCompact()
-        IsCompact = Window:GetSidebarWidth() == WindowInfo.SidebarCompactWidth
-        if WindowInfo.DisableCompactingSnap then
-            IsCompact = Window:GetSidebarWidth() <= WindowInfo.CompactWidthActivation
-        end
-
-        WindowTitle.Visible = not IsCompact
-        if not WindowInfo.Icon then
-            WindowIcon.Visible = IsCompact
-        end
-
-        for _, Button in Library.TabButtons do
-            if not Button.Icon then
-                continue
-            end
-
-            Button.Label.Visible = not IsCompact
-            Button.Padding.PaddingBottom = UDim.new(0, IsCompact and 6 or 11)
-            Button.Padding.PaddingLeft = UDim.new(0, IsCompact and 6 or 12)
-            Button.Padding.PaddingRight = UDim.new(0, IsCompact and 6 or 12)
-            Button.Padding.PaddingTop = UDim.new(0, IsCompact and 6 or 11)
-            Button.Icon.SizeConstraint = IsCompact and Enum.SizeConstraint.RelativeXY or Enum.SizeConstraint.RelativeYY
-        end
-    end
-
+    --// Tabs sit in a top strip, so the sidebar API is kept only as no-ops for old scripts
     function Window:IsSidebarCompacted()
-        return IsCompact
+        return false
     end
 
-    function Window:SetCompact(State)
-        Window:SetSidebarWidth(State and WindowInfo.SidebarCompactWidth or LastExpandedWidth)
-    end
+    function Window:SetCompact(_State) end
 
     function Window:GetSidebarWidth()
-        return Tabs.Size.X.Offset
+        return 0
     end
 
-    function Window:SetSidebarWidth(Width)
-        Width = math.clamp(Width, 48, MainFrame.Size.X.Offset - WindowInfo.MinContainerWidth - 1)
-
-        DividerLine.Position = UDim2.fromOffset(Width, 0)
-
-        TitleHolder.Size = UDim2.new(0, Width, 1, 0)
-        RightWrapper.Size = UDim2.new(1, -Width - 57 - 1, 1, -16)
-        Tabs.Size = UDim2.new(0, Width, 1, -70)
-        Container.Size = UDim2.new(1, -Width - 1, 1, -70)
-
-        if WindowInfo.EnableCompacting then
-            ApplyCompact()
-        end
-    
-        RefreshWindowTitleSize()
-        if not IsCompact then
-            LastExpandedWidth = Width
-        end
-    end
+    function Window:SetSidebarWidth(_Width) end
 
     function Window:ShowTabInfo(Name, Description)
         CurrentTabLabel.Text = Name
-        CurrentTabDescription.Text = Description
-
-        if IsDefaultSearchbarSize then
-            SearchBox.Size = UDim2.fromScale(0.5, 1)
-        end
-        CurrentTabInfo.Visible = true
+        CurrentTabDescription.Text = Description or ""
+        RefreshWindowTitleSize()
     end
 
-    function Window:HideTabInfo()
-        CurrentTabInfo.Visible = false
-        if IsDefaultSearchbarSize then
-            SearchBox.Size = UDim2.fromScale(1, 1)
+    function Window:HideTabInfo() end
+
+    --// Tab strip pill: icon + label, filled and outlined while active
+    local function CreateTabButton(Name, Icon, Order)
+        local TabButton = New("TextButton", {
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundColor3 = "MainColor",
+            BackgroundTransparency = 1,
+            Size = UDim2.fromOffset(0, TabBarHeight - 4),
+            Text = "",
+            LayoutOrder = Order,
+            Parent = Tabs,
+        })
+        table.insert(
+            Library.Corners,
+            New("UICorner", {
+                CornerRadius = UDim.new(0, WindowInfo.CornerRadius),
+                Parent = TabButton,
+            })
+        )
+        local TabStroke = New("UIStroke", {
+            Color = "OutlineColor",
+            Transparency = 1,
+            Parent = TabButton,
+        })
+
+        local ButtonPadding = New("UIPadding", {
+            PaddingLeft = UDim.new(0, 11),
+            PaddingRight = UDim.new(0, 12),
+            Parent = TabButton,
+        })
+        New("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            Padding = UDim.new(0, 7),
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            Parent = TabButton,
+        })
+
+        local TabIcon
+        if Icon then
+            TabIcon = New("ImageLabel", {
+                ImageColor3 = Icon.Custom and "WhiteColor" or "FontColor",
+                ImageTransparency = 0.5,
+                ScaleType = Enum.ScaleType.Fit,
+                Size = UDim2.fromOffset(14, 14),
+                Parent = TabButton,
+            })
+            Library:ApplyLucideIcon(TabIcon, Icon)
         end
+
+        local TabLabel = New("TextLabel", {
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundTransparency = 1,
+            FontFace = "FontMedium",
+            LayoutOrder = 1,
+            Size = UDim2.fromScale(0, 1),
+            Text = Name,
+            TextSize = 13,
+            TextTransparency = 0.5,
+            Parent = TabButton,
+        })
+
+        table.insert(Library.TabButtons, {
+            Button = TabButton,
+            Label = TabLabel,
+            Padding = ButtonPadding,
+            Icon = TabIcon,
+        })
+
+        return TabButton, TabLabel, TabIcon, TabStroke
     end
 
     function Window:AddTab(...)
@@ -12129,9 +12108,9 @@ function Library:CreateWindow(WindowInfo)
         end
 
         local TabButton: TextButton
-        local TabIndicator
         local TabLabel
         local TabIcon
+        local TabStroke
 
         local TabContainer
         local TabLeft
@@ -12139,76 +12118,7 @@ function Library:CreateWindow(WindowInfo)
 
         Icon = Library:GetCustomIcon(Icon)
         do
-            TabButton = New("TextButton", {
-                BackgroundColor3 = "MainColor",
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, 0, 0, 40),
-                Text = "",
-                LayoutOrder = Order,
-                Parent = Tabs,
-            })
-            New("UICorner", {
-                CornerRadius = UDim.new(0, TabButtonsStyle.CornerRadius),
-                Parent = TabButton,
-            })
-
-            if TabButtonsStyle.Indicator then
-                TabIndicator = New("Frame", {
-                    AnchorPoint = Vector2.new(1, 0.5),
-                    BackgroundColor3 = "AccentColor",
-                    BackgroundTransparency = 1,
-                    Position = UDim2.new(0, -2, 0.5, 0),
-                    Size = UDim2.fromOffset(TabButtonsStyle.IndicatorWidth, TabButtonsStyle.IndicatorHeight),
-                    Parent = TabButton,
-                })
-
-                New("UICorner", {
-                    CornerRadius = UDim.new(1, 0),
-                    Parent = TabIndicator,
-                })
-            end
-
-            local ButtonHolder = New("Frame", {
-                BackgroundTransparency = 1,
-                Size = UDim2.fromScale(1, 1),
-                Parent = TabButton,
-            })
-            local ButtonPadding = New("UIPadding", {
-                PaddingBottom = UDim.new(0, IsCompact and 6 or 11),
-                PaddingLeft = UDim.new(0, IsCompact and 6 or 12),
-                PaddingRight = UDim.new(0, IsCompact and 6 or 12),
-                PaddingTop = UDim.new(0, IsCompact and 6 or 11),
-                Parent = ButtonHolder,
-            })
-            TabLabel = New("TextLabel", {
-                BackgroundTransparency = 1,
-                Position = UDim2.fromOffset(30, 0),
-                Size = UDim2.new(1, -30, 1, 0),
-                Text = Name,
-                TextSize = 16,
-                TextTransparency = 0.5,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                Visible = not IsCompact,
-                Parent = ButtonHolder,
-            })
-
-            if Icon then
-                TabIcon = New("ImageLabel", {
-                    ImageColor3 = Icon.Custom and "WhiteColor" or "AccentColor",
-                    ImageTransparency = 0.5,
-                    ScaleType = Enum.ScaleType.Fit,
-                    Size = UDim2.fromScale(1, 1),
-                    SizeConstraint = IsCompact and Enum.SizeConstraint.RelativeXY or Enum.SizeConstraint.RelativeYY,
-                    Parent = ButtonHolder,
-                })
-                Library:ApplyLucideIcon(TabIcon, Icon)
-            end
-
-            table.insert(Library.TabButtons, {
-                Label = TabLabel,
-                Padding = ButtonPadding,
-                Icon = TabIcon,
-            })
+            TabButton, TabLabel, TabIcon, TabStroke = CreateTabButton(Name, Icon, Order)
 
             --// Tab Container \\--
             TabContainer = New("Frame", {
@@ -12225,7 +12135,7 @@ function Library:CreateWindow(WindowInfo)
                 CanvasSize = UDim2.fromScale(0, 0),
                 ScrollBarImageTransparency = 1,
                 ScrollBarThickness = 0,
-                Size = UDim2.new(0.5, -3, 1, 0),
+                Size = UDim2.new(0.5, -4, 1, 0),
                 Parent = TabContainer,
             })
             New("UIListLayout", {
@@ -12260,7 +12170,7 @@ function Library:CreateWindow(WindowInfo)
                 Position = UDim2.fromScale(1, 0),
                 ScrollBarImageTransparency = 1,
                 ScrollBarThickness = 0,
-                Size = UDim2.new(0.5, -3, 1, 0),
+                Size = UDim2.new(0.5, -4, 1, 0),
                 Parent = TabContainer,
             })
             New("UIListLayout", {
@@ -12465,7 +12375,7 @@ function Library:CreateWindow(WindowInfo)
             local Offset = WarningBoxHolder.Visible and WarningBox.Size.Y.Offset + 8 or 0
             for _, Side in Tab.Sides do
                 Side.Position = UDim2.new(Side.Position.X.Scale, 0, 0, Offset)
-                Side.Size = UDim2.new(0.5, -3, 1, -Offset)
+                Side.Size = UDim2.new(0.5, -4, 1, -Offset)
             end
         end
 
@@ -12529,7 +12439,7 @@ function Library:CreateWindow(WindowInfo)
 
             do
                 TabboxHolder = New("Frame", {
-                    BackgroundColor3 = "BackgroundColor",
+                    BackgroundColor3 = "SurfaceColor",
                     Size = UDim2.fromScale(1, 0),
                     Parent = BoxHolder,
                 })
@@ -12927,7 +12837,7 @@ function Library:CreateWindow(WindowInfo)
 
             do
                 GroupboxHolder = New("Frame", {
-                    BackgroundColor3 = "BackgroundColor",
+                    BackgroundColor3 = "SurfaceColor",
                     Size = UDim2.fromScale(1, 0),
                     Parent = BoxHolder,
                 })
@@ -12950,10 +12860,10 @@ function Library:CreateWindow(WindowInfo)
                     Parent = GroupboxHolder,
                 })
                 New("UIPadding", {
-                    PaddingBottom = UDim.new(0, 6),
-                    PaddingLeft = UDim.new(0, 6),
-                    PaddingRight = UDim.new(0, 6),
-                    PaddingTop = UDim.new(0, 6),
+                    PaddingBottom = UDim.new(0, 7),
+                    PaddingLeft = UDim.new(0, 10),
+                    PaddingRight = UDim.new(0, 8),
+                    PaddingTop = UDim.new(0, 7),
                     Parent = GroupboxTop,
                 })
 
@@ -12961,39 +12871,40 @@ function Library:CreateWindow(WindowInfo)
                 if BoxIcon then
                     local GroupboxHeaderIcon = New("ImageLabel", {
                         AnchorPoint = Vector2.new(0, 0.5),
-                        ImageColor3 = BoxIcon.Custom and "WhiteColor" or "AccentColor",
+                        ImageColor3 = BoxIcon.Custom and "WhiteColor" or "FontColor",
                         Position = UDim2.fromScale(0, 0.5),
-                        Size = UDim2.fromOffset(22, 22),
+                        Size = UDim2.fromOffset(14, 14),
                         Parent = GroupboxTop,
                     })
                     Library:ApplyLucideIcon(GroupboxHeaderIcon, BoxIcon)
                 end
 
-                local RightInset = if Info.DisableCollapsing ~= true then 22 else 0
+                local RightInset = if Info.DisableCollapsing ~= true then 18 else 0
+                local IconInset = BoxIcon and 22 or 0
                 local TextsFrame = New("Frame", {
                     AutomaticSize = Enum.AutomaticSize.Y,
                     BackgroundTransparency = 1,
-                    Position = UDim2.fromOffset(BoxIcon and 24 or 0, 0),
-                    Size = UDim2.new(1, -RightInset - (BoxIcon and 24 or 0), 0, 0),
+                    Position = UDim2.fromOffset(IconInset, 0),
+                    Size = UDim2.new(1, -RightInset - IconInset, 0, 0),
                     Parent = GroupboxTop,
                 })
                 New("UIListLayout", {
+                    Padding = UDim.new(0, 2),
                     Parent = TextsFrame,
                 })
                 New("UIPadding", {
-                    PaddingBottom = UDim.new(0, 3),
-                    PaddingLeft = UDim.new(0, 6),
-                    PaddingRight = UDim.new(0, 6),
-                    PaddingTop = UDim.new(0, 3),
+                    PaddingBottom = UDim.new(0, 1),
+                    PaddingTop = UDim.new(0, 1),
                     Parent = TextsFrame,
                 })
 
                 GroupboxLabel = New("TextLabel", {
                     AutomaticSize = Enum.AutomaticSize.Y,
                     BackgroundTransparency = 1,
+                    FontFace = "FontBold",
                     Size = UDim2.fromScale(1, 0),
                     Text = Info.Name,
-                    TextSize = 15,
+                    TextSize = 13,
                     TextWrapped = true,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     Parent = TextsFrame,
@@ -13008,8 +12919,8 @@ function Library:CreateWindow(WindowInfo)
                     BackgroundTransparency = 1,
                     Size = UDim2.fromScale(1, 0),
                     Text = Info.Description or "",
-                    TextSize = 14,
-                    TextTransparency = 0.5,
+                    TextColor3 = "MutedFontColor",
+                    TextSize = 12,
                     TextWrapped = true,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     Visible = (Info.Description ~= nil),
@@ -13020,9 +12931,9 @@ function Library:CreateWindow(WindowInfo)
                     Visible = Info.DisableCollapsing ~= true,
                     AnchorPoint = Vector2.new(1, 0.5),
                     BackgroundTransparency = 1,
-                    ImageColor3 = "WhiteColor",
+                    ImageColor3 = "MutedFontColor",
                     Position = UDim2.fromScale(1, 0.5),
-                    Size = UDim2.fromOffset(22, 22),
+                    Size = UDim2.fromOffset(16, 16),
                     Parent = GroupboxTop,
                 })
                 if ArrowIcon then
@@ -13048,14 +12959,14 @@ function Library:CreateWindow(WindowInfo)
                 })
 
                 GroupboxList = New("UIListLayout", {
-                    Padding = UDim.new(0, 8),
+                    Padding = UDim.new(0, 7),
                     Parent = GroupboxContainer,
                 })
                 New("UIPadding", {
-                    PaddingBottom = UDim.new(0, 7),
-                    PaddingLeft = UDim.new(0, 7),
-                    PaddingRight = UDim.new(0, 7),
-                    PaddingTop = UDim.new(0, 7),
+                    PaddingBottom = UDim.new(0, 9),
+                    PaddingLeft = UDim.new(0, 10),
+                    PaddingRight = UDim.new(0, 10),
+                    PaddingTop = UDim.new(0, 8),
                     Parent = GroupboxContainer,
                 })
             end
@@ -13098,7 +13009,7 @@ function Library:CreateWindow(WindowInfo)
                 end
 
                 local TopSize = (GroupboxTop.AbsoluteSize.Y / Library.DPIScale)
-                local ContentSize = (GroupboxList.AbsoluteContentSize.Y / Library.DPIScale) + 14
+                local ContentSize = (GroupboxList.AbsoluteContentSize.Y / Library.DPIScale) + 17
                 local ContainerSize = ContentSize
                 if Groupbox.PoppedOut then
                     ContainerSize = math.min(ContainerSize, GetPopOutBodyMaxHeight(Groupbox, TopSize + 1))
@@ -13342,11 +13253,9 @@ function Library:CreateWindow(WindowInfo)
             TweenService:Create(TabButton, Library.TweenInfo, {
                 BackgroundTransparency = 0,
             }):Play()
-            if TabIndicator then
-                TweenService:Create(TabIndicator, Library.TweenInfo, {
-                    BackgroundTransparency = 0,
-                }):Play()
-            end
+            TweenService:Create(TabStroke, Library.TweenInfo, {
+                Transparency = 0,
+            }):Play()
             TweenService:Create(TabLabel, Library.TweenInfo, {
                 TextTransparency = 0,
             }):Play()
@@ -13356,9 +13265,7 @@ function Library:CreateWindow(WindowInfo)
                 }):Play()
             end
 
-            if Description then
-                Window:ShowTabInfo(Name, Description)
-            end
+            Window:ShowTabInfo(Name, Description)
 
             Library:PlayTabAnimation(Tab, true)
             Tab:RefreshSides()
@@ -13374,12 +13281,10 @@ function Library:CreateWindow(WindowInfo)
             TweenService:Create(TabButton, Library.TweenInfo, {
                 BackgroundTransparency = 1,
             }):Play()
+            TweenService:Create(TabStroke, Library.TweenInfo, {
+                Transparency = 1,
+            }):Play()
 
-            if TabIndicator then
-                TweenService:Create(TabIndicator, Library.TweenInfo, {
-                    BackgroundTransparency = 1,
-                }):Play()
-            end
 
             TweenService:Create(TabLabel, Library.TweenInfo, {
                 TextTransparency = 0.5,
@@ -13526,85 +13431,15 @@ function Library:CreateWindow(WindowInfo)
         Icon = Icon or "key"
 
         local TabButton: TextButton
-        local TabIndicator
         local TabLabel
         local TabIcon
+        local TabStroke
 
         local TabContainer
 
         Icon = if Icon == "key" then KeyIcon else Library:GetCustomIcon(Icon)
         do
-            TabButton = New("TextButton", {
-                BackgroundColor3 = "MainColor",
-                BackgroundTransparency = 1,
-                Size = UDim2.new(1, 0, 0, 40),
-                Text = "",
-                LayoutOrder = Order,
-                Parent = Tabs,
-            })
-            New("UICorner", {
-                CornerRadius = UDim.new(0, TabButtonsStyle.CornerRadius),
-                Parent = TabButton,
-            })
-
-            if TabButtonsStyle.Indicator then
-                TabIndicator = New("Frame", {
-                    AnchorPoint = Vector2.new(1, 0.5),
-                    BackgroundColor3 = "AccentColor",
-                    BackgroundTransparency = 1,
-                    Position = UDim2.new(0, -2, 0.5, 0),
-                    Size = UDim2.fromOffset(TabButtonsStyle.IndicatorWidth, TabButtonsStyle.IndicatorHeight),
-                    Parent = TabButton,
-                })
-
-                New("UICorner", {
-                    CornerRadius = UDim.new(1, 0),
-                    Parent = TabIndicator,
-                })
-            end
-
-            local ButtonHolder = New("Frame", {
-                BackgroundTransparency = 1,
-                Size = UDim2.fromScale(1, 1),
-                Parent = TabButton,
-            })
-            local ButtonPadding = New("UIPadding", {
-                PaddingBottom = UDim.new(0, IsCompact and 6 or 11),
-                PaddingLeft = UDim.new(0, IsCompact and 6 or 12),
-                PaddingRight = UDim.new(0, IsCompact and 6 or 12),
-                PaddingTop = UDim.new(0, IsCompact and 6 or 11),
-                Parent = ButtonHolder,
-            })
-
-            TabLabel = New("TextLabel", {
-                BackgroundTransparency = 1,
-                Position = UDim2.fromOffset(30, 0),
-                Size = UDim2.new(1, -30, 1, 0),
-                Text = Name,
-                TextSize = 16,
-                TextTransparency = 0.5,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                Visible = not IsCompact,
-                Parent = ButtonHolder,
-            })
-
-            if Icon then
-                TabIcon = New("ImageLabel", {
-                    ImageColor3 = Icon.Custom and "WhiteColor" or "AccentColor",
-                    ImageTransparency = 0.5,
-                    ScaleType = Enum.ScaleType.Fit,
-                    Size = UDim2.fromScale(1, 1),
-                    SizeConstraint = IsCompact and Enum.SizeConstraint.RelativeXY or Enum.SizeConstraint.RelativeYY,
-                    Parent = ButtonHolder,
-                })
-                Library:ApplyLucideIcon(TabIcon, Icon)
-            end
-
-            table.insert(Library.TabButtons, {
-                Label = TabLabel,
-                Padding = ButtonPadding,
-                Icon = TabIcon,
-            })
+            TabButton, TabLabel, TabIcon, TabStroke = CreateTabButton(Name, Icon, Order)
 
             --// Tab Container \\--
             TabContainer = New("ScrollingFrame", {
@@ -13795,12 +13630,10 @@ function Library:CreateWindow(WindowInfo)
             TweenService:Create(TabButton, Library.TweenInfo, {
                 BackgroundTransparency = 0,
             }):Play()
+            TweenService:Create(TabStroke, Library.TweenInfo, {
+                Transparency = 0,
+            }):Play()
 
-            if TabIndicator then
-                TweenService:Create(TabIndicator, Library.TweenInfo, {
-                    BackgroundTransparency = 0,
-                }):Play()
-            end
 
             TweenService:Create(TabLabel, Library.TweenInfo, {
                 TextTransparency = 0,
@@ -13814,9 +13647,7 @@ function Library:CreateWindow(WindowInfo)
 
             Library:PlayTabAnimation(Tab, true)
 
-            if Description then
-                Window:ShowTabInfo(Name, Description)
-            end
+            Window:ShowTabInfo(Name, Description)
 
             Tab:RefreshSides()
 
@@ -13831,12 +13662,10 @@ function Library:CreateWindow(WindowInfo)
             TweenService:Create(TabButton, Library.TweenInfo, {
                 BackgroundTransparency = 1,
             }):Play()
+            TweenService:Create(TabStroke, Library.TweenInfo, {
+                Transparency = 1,
+            }):Play()
 
-            if TabIndicator then
-                TweenService:Create(TabIndicator, Library.TweenInfo, {
-                    BackgroundTransparency = 1,
-                }):Play()
-            end
 
             TweenService:Create(TabLabel, Library.TweenInfo, {
                 TextTransparency = 0.5,
