@@ -277,11 +277,12 @@ local Library = {
     CornerRadius = 6,
 
     --// Scheme \\--
-    --// SurfaceColor, MutedFontColor, FontMedium, FontBold are derived from these when a theme omits them
+    --// SurfaceColor, MutedFontColor, HoverColor, InlineColor, DarkAccentColor, ToggleOffColor,
+    --// FontMedium and FontBold are derived from these when a theme omits them
     IsLightTheme = false,
     Scheme = {
         BackgroundColor = Color3.fromRGB(14, 14, 15),
-        MainColor = Color3.fromRGB(26, 26, 28),
+        MainColor = Color3.fromRGB(20, 20, 22),
         AccentColor = Color3.fromRGB(232, 232, 236),
         OutlineColor = Color3.fromRGB(36, 36, 39),
         FontColor = Color3.fromRGB(236, 236, 240),
@@ -459,6 +460,7 @@ local Templates = {
         PopOut = true,
         MaxPopOutHeight = nil,
         PopOutWidth = nil,
+        MaxHeight = nil, --// caps the body height; content past it scrolls inside the box
     },
     Tabbox = {
         Side = 1,
@@ -674,6 +676,22 @@ local SchemeDerived = {
     end,
     MutedFontColor = function()
         return Library.Scheme.FontColor:Lerp(Library.Scheme.BackgroundColor, 0.45)
+    end,
+    --// Raised fill for hovered buttons, the active tab and selected rows
+    HoverColor = function()
+        return Library.Scheme.MainColor:Lerp(Library.Scheme.FontColor, 0.06)
+    end,
+    --// Hairlines inside boxes (header rule, dividers)
+    InlineColor = function()
+        return Library.Scheme.OutlineColor:Lerp(Library.Scheme.BackgroundColor, 0.35)
+    end,
+    --// Lower half of the slider sheen
+    DarkAccentColor = function()
+        return Library.Scheme.AccentColor:Lerp(Library.Scheme.BackgroundColor, 0.3)
+    end,
+    --// Unchecked checkbox / switch track
+    ToggleOffColor = function()
+        return Library.Scheme.MainColor
     end,
     FontMedium = function()
         return WithWeight(Enum.FontWeight.SemiBold)
@@ -1480,6 +1498,10 @@ function Library:UpdateSearch(SearchText)
     end
 
     Library.LastSearchTab = nil
+end
+
+function Library:GetSchemeColor(Index: string): any
+    return GetSchemeValue(Index)
 end
 
 function Library:AddToRegistry(Instance, Properties)
@@ -6544,30 +6566,24 @@ do
 
             New("Frame", {
                 AnchorPoint = Vector2.new(0, 0.5),
-                BackgroundColor3 = "MainColor",
-                BorderColor3 = "OutlineColor",
-                BorderSizePixel = 1,
+                BackgroundColor3 = "InlineColor",
                 Position = UDim2.fromScale(0, 0.5),
-                Size = UDim2.new(0.5, -SizeX, 0, 2),
+                Size = UDim2.new(0.5, -SizeX, 0, 1),
                 Parent = InnerHolder,
             })
             New("Frame", {
                 AnchorPoint = Vector2.new(1, 0.5),
-                BackgroundColor3 = "MainColor",
-                BorderColor3 = "OutlineColor",
-                BorderSizePixel = 1,
+                BackgroundColor3 = "InlineColor",
                 Position = UDim2.fromScale(1, 0.5),
-                Size = UDim2.new(0.5, -SizeX, 0, 2),
+                Size = UDim2.new(0.5, -SizeX, 0, 1),
                 Parent = InnerHolder,
             })
         else
             New("Frame", {
                 AnchorPoint = Vector2.new(0, 0.5),
-                BackgroundColor3 = "MainColor",
-                BorderColor3 = "OutlineColor",
-                BorderSizePixel = 1,
+                BackgroundColor3 = "InlineColor",
                 Position = UDim2.fromScale(0, 0.5),
-                Size = UDim2.new(1, 0, 0, 2),
+                Size = UDim2.new(1, 0, 0, 1),
                 Parent = InnerHolder,
             })
         end
@@ -6985,7 +7001,7 @@ do
                 Button.Tween:Play()
 
                 TweenService:Create(Button.Base, Library.HoverTweenInfo, {
-                    BackgroundColor3 = Hovered and Library:GetBetterColor(Library.Scheme.MainColor, 6) or Library.Scheme.MainColor,
+                    BackgroundColor3 = Hovered and GetSchemeValue("HoverColor") or Library.Scheme.MainColor,
                 }):Play()
                 TweenService:Create(Button.Stroke, Library.HoverTweenInfo, {
                     Color = Hovered and Library:GetLighterColor(Library.Scheme.OutlineColor) or Library.Scheme.OutlineColor,
@@ -7362,7 +7378,7 @@ do
 
         local Checkbox = New("Frame", {
             AnchorPoint = Vector2.new(0, 0.5),
-            BackgroundColor3 = "MainColor",
+            BackgroundColor3 = "ToggleOffColor",
             Position = UDim2.fromScale(0, 0.5),
             Size = UDim2.fromOffset(14, 14),
             Parent = Button,
@@ -7416,7 +7432,7 @@ do
                 return
             end
 
-            local Fill = Toggle.Value and "AccentColor" or "MainColor"
+            local Fill = Toggle.Value and "AccentColor" or "ToggleOffColor"
             local Edge = Toggle.Value and "AccentColor" or "OutlineColor"
             Library.Registry[Checkbox].BackgroundColor3 = Fill
             Library.Registry[CheckboxStroke].Color = Edge
@@ -7426,9 +7442,9 @@ do
                 CheckImage.ImageTransparency = Toggle.Value and 0.6 or 1
                 CheckImage.Size = UDim2.fromOffset(10, 10)
 
-                Checkbox.BackgroundColor3 = Library.Scheme[Fill]
+                Checkbox.BackgroundColor3 = GetSchemeValue(Fill)
                 Checkbox.BackgroundTransparency = 0.6
-                CheckboxStroke.Color = Library.Scheme[Edge]
+                CheckboxStroke.Color = GetSchemeValue(Edge)
                 CheckboxStroke.Transparency = 0.6
 
                 return
@@ -7440,11 +7456,11 @@ do
                 TextTransparency = if Toggle.Value then 0 elseif Hovering then 0.2 else 0.45,
             }):Play()
             TweenService:Create(Checkbox, Library.HoverTweenInfo, {
-                BackgroundColor3 = Library.Scheme[Fill],
+                BackgroundColor3 = GetSchemeValue(Fill),
                 BackgroundTransparency = 0,
             }):Play()
             TweenService:Create(CheckboxStroke, Library.HoverTweenInfo, {
-                Color = if not Toggle.Value and Hovering then Library:GetLighterColor(Library.Scheme.OutlineColor) else Library.Scheme[Edge],
+                Color = if not Toggle.Value and Hovering then Library:GetLighterColor(Library.Scheme.OutlineColor) else GetSchemeValue(Edge),
                 Transparency = 0,
             }):Play()
             TweenService:Create(CheckImage, Library.GlideTweenInfo, {
@@ -7652,7 +7668,7 @@ do
 
         local Switch = New("Frame", {
             AnchorPoint = Vector2.new(1, 0.5),
-            BackgroundColor3 = "MainColor",
+            BackgroundColor3 = "ToggleOffColor",
             Position = UDim2.fromScale(1, 0.5),
             Size = UDim2.fromOffset(28, 16),
             Parent = Button,
@@ -7708,7 +7724,7 @@ do
             end
 
             local Offset = Toggle.Value and 1 or 0
-            local Track = Toggle.Value and "AccentColor" or "MainColor"
+            local Track = Toggle.Value and "AccentColor" or "ToggleOffColor"
             local Edge = Toggle.Value and "AccentColor" or "OutlineColor"
             local Knob = Toggle.Value and "BackgroundColor" or "MutedFontColor"
 
@@ -8364,11 +8380,20 @@ do
             Parent = Fill,
         })
         New("UIGradient", {
+            --// Gradients multiply the fill colour, so the bottom stop is DarkAccent / Accent per channel
+            Color = function()
+                local Accent = Library.Scheme.AccentColor
+                local Dark = GetSchemeValue("DarkAccentColor")
+                local function Ratio(A: number, B: number): number
+                    return if A > 0 then math.clamp(B / A, 0, 1) else 1
+                end
+
+                return ColorSequence.new(
+                    Color3.new(1, 1, 1),
+                    Color3.new(Ratio(Accent.R, Dark.R), Ratio(Accent.G, Dark.G), Ratio(Accent.B, Dark.B))
+                )
+            end,
             Rotation = 90,
-            Transparency = NumberSequence.new({
-                NumberSequenceKeypoint.new(0, 0),
-                NumberSequenceKeypoint.new(1, 0.25),
-            }),
             Parent = Fill,
         })
 
@@ -10079,9 +10104,7 @@ do
                 end
 
                 local Button = New("TextButton", {
-                    BackgroundColor3 = function()
-                        return Library:GetBetterColor(Library.Scheme.MainColor, 8)
-                    end,
+                    BackgroundColor3 = "HoverColor",
                     BackgroundTransparency = 1,
                     LayoutOrder = Index,
                     Size = UDim2.new(1, 0, 0, 22),
@@ -13647,6 +13670,8 @@ function Library:CreateWindow(WindowInfo)
                     LayoutOrder = 1,
                     Size = UDim2.new(1, 0, 0, 1),
                 })
+                Library.Registry[GroupboxLine].BackgroundColor3 = "InlineColor"
+                GroupboxLine.BackgroundColor3 = GetSchemeValue("InlineColor")
 
                 GroupboxContainer = New("ScrollingFrame", {
                     AutomaticCanvasSize = Enum.AutomaticSize.None,
@@ -13654,8 +13679,9 @@ function Library:CreateWindow(WindowInfo)
                     BorderSizePixel = 0,
                     CanvasSize = UDim2.fromOffset(0, 0),
                     LayoutOrder = 2,
+                    ScrollBarImageColor3 = "FontColor",
                     ScrollBarImageTransparency = 1,
-                    ScrollBarThickness = 0,
+                    ScrollBarThickness = 2,
                     ScrollingEnabled = false,
                     Size = UDim2.fromScale(1, 0),
                     Parent = GroupboxHolder,
@@ -13716,11 +13742,14 @@ function Library:CreateWindow(WindowInfo)
                 local ContainerSize = ContentSize
                 if Groupbox.PoppedOut then
                     ContainerSize = math.min(ContainerSize, GetPopOutBodyMaxHeight(Groupbox, TopSize + 1))
+                elseif typeof(Info.MaxHeight) == "number" then
+                    ContainerSize = math.min(ContainerSize, Info.MaxHeight)
                 end
 
                 local NeedsScroll = ContentSize > ContainerSize + 1
                 GroupboxContainer.CanvasSize = UDim2.fromOffset(0, if NeedsScroll then ContentSize else 0)
                 GroupboxContainer.ScrollingEnabled = NeedsScroll
+                GroupboxContainer.ScrollBarImageTransparency = if NeedsScroll then 0.5 else 1
 
                 local TargetSize = UDim2.new(1, 0, 0, if Groupbox.Collapsed then TopSize else (TopSize + 1 + ContainerSize))
                 GroupboxContainer.Size = UDim2.new(1, 0, 0, ContainerSize)

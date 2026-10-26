@@ -42,7 +42,13 @@ local LuminanceRedWeight,
 local ContrastRatioOffset = 0.05 --// Offset added to both luminances when computing a contrast ratio
 
 --// Theme Manager
-local SchemeIndexes = { "FontColor", "MainColor", "AccentColor", "BackgroundColor", "OutlineColor" }
+--// Every theme has the core colors; the derived ones fall back to the library's computed tones when a theme omits them
+local CoreSchemeIndexes = { "FontColor", "MainColor", "AccentColor", "BackgroundColor", "OutlineColor" }
+local DerivedSchemeIndexes = { "SurfaceColor", "HoverColor", "InlineColor", "DarkAccentColor", "ToggleOffColor", "MutedFontColor" }
+local SchemeIndexes = table.clone(CoreSchemeIndexes)
+for _, Index in DerivedSchemeIndexes do
+    table.insert(SchemeIndexes, Index)
+end
 
 local ThemeManager = {
     Library = nil,
@@ -59,7 +65,7 @@ local ThemeManager = {
     BuiltInThemes = {
         ["Default"] = {
             1,
-            { FontColor = "ffffff", MainColor = "191919", AccentColor = "7d55ff", BackgroundColor = "0f0f0f", OutlineColor = "282828", BackgroundImage = "" },
+            { FontColor = "ececf0", MainColor = "141416", AccentColor = "e8e8ec", BackgroundColor = "0e0e0f", OutlineColor = "242427", BackgroundImage = "" },
         },
         ["BBot"] = {
             2,
@@ -185,8 +191,8 @@ local function IsValidThemeData(Data: any): boolean
         return false
     end
 
-    --// Require the color scheme to be present; font/background image are optional and fall back to current values
-    for _, SchemeIndex in SchemeIndexes do
+    --// Require the core colors; derived colors, font and background image are optional
+    for _, SchemeIndex in CoreSchemeIndexes do
         if typeof(Data[SchemeIndex]) ~= "string" then
             return false
         end
@@ -330,10 +336,13 @@ end
 
 local function BuildCurrentThemeData(): {[string]: any}
     local Library = ThemeManager.Library
-    local ThemeData = {
-        FontFace = Library.Options.FontFace.Value,
-        BackgroundImage = Library.Options.BackgroundImage.Value
-    }
+    local ThemeData = {}
+    if Library.Options.FontFace then
+        ThemeData.FontFace = Library.Options.FontFace.Value
+    end
+    if Library.Options.BackgroundImage then
+        ThemeData.BackgroundImage = Library.Options.BackgroundImage.Value
+    end
 
     for _, SchemeIndex in SchemeIndexes do
         ThemeData[SchemeIndex] = Library.Options[SchemeIndex].Value:ToHex()
@@ -434,6 +443,10 @@ function ThemeManager:SetDefaultTheme(Theme: any)
     for _, SchemeIndex in SchemeIndexes do
         local IndexData = Theme[SchemeIndex]
         local IndexType = typeof(IndexData)
+
+        if IndexData == nil and table.find(DerivedSchemeIndexes, SchemeIndex) then
+            continue
+        end
         
         if IndexType == "Color3" then
             LibraryScheme[SchemeIndex] = IndexData
@@ -463,8 +476,7 @@ function ThemeManager:SetDefaultTheme(Theme: any)
         FinalTheme.FontFace = FontFace
     
     else
-        LibraryScheme.Font = Font.fromEnum(Enum.Font.Code)
-        FinalTheme.FontFace = "Code"
+        LibraryScheme.Font = Library.Scheme.Font
     end
 
     --// Default Scheme Colors
@@ -681,6 +693,19 @@ function ThemeManager:ApplyThemeData(ThemeData: any): (boolean, string?)
         end
     end
 
+    --// Derived colors this theme leaves out go back to being computed from its core colors
+    for _, Index in DerivedSchemeIndexes do
+        if ThemeData[Index] ~= nil then
+            continue
+        end
+
+        Library.Scheme[Index] = nil
+        local Element = Library.Options[Index]
+        if Element then
+            Element:SetValue(Library:GetSchemeColor(Index))
+        end
+    end
+
     ThemeManager:ThemeUpdate()
     return true
 end
@@ -771,118 +796,99 @@ end
 
 function ThemeManager:CreateThemeManager(Themesbox: any)
     assert(ThemeManager.Library, "Library is not set, call ThemeManager:SetLibrary(Library) first.")
+    local Library = ThemeManager.Library
 
     local BuiltInThemesNames = {}
     for Name, _ThemeData in ThemeManager.BuiltInThemes do
         table.insert(BuiltInThemesNames, Name)
     end
-
-    local CustomThemeList, CustomThemeName, ThemeList, FontFace, BackgroundImage, DefaultThemeLabel, ThemeJSONInput
-    local function RefreshList()
-        CustomThemeList:SetValues(ThemeManager:ReloadCustomThemes())
-        CustomThemeList:SetValue(nil)
-
-        ThemeList:SetValues(BuiltInThemesNames)
-    end
-
-    local function RefreshDefaultThemeLabel()
-        local DefaultThemeName, _Success, _ErrorMessage = ThemeManager:GetDefaultTheme()
-
-        DefaultThemeLabel:SetText(string.format("Current default theme: %s", DefaultThemeName))
-        if CustomThemeList then RefreshList() end
-    end
-
     table.sort(BuiltInThemesNames, function(IndexA, IndexB)
         return ThemeManager.BuiltInThemes[IndexA][1] < ThemeManager.BuiltInThemes[IndexB][1]
     end)
 
-    local function CreateColorOption(Text, SchemeIndex)
-        Themesbox:AddLabel(Text):AddColorPicker(SchemeIndex, {
-            Default = ThemeManager.Library.Scheme[SchemeIndex]
-        })
+    local ThemeList, ThemeNameInput
 
-        return ThemeManager.Library.Options[SchemeIndex]
+    --// Built-in themes first, then the user's saved ones
+    local function GetAllThemeNames(): {string}
+        local Names = table.clone(BuiltInThemesNames)
+        for _, Name in ThemeManager:ReloadCustomThemes() do
+            if not table.find(Names, Name) then
+                table.insert(Names, Name)
+            end
+        end
+
+        return Names
     end
 
-    local BackgroundColor = CreateColorOption("Background color", "BackgroundColor")
-    local MainColor = CreateColorOption("Main color", "MainColor")
-    local AccentColor = CreateColorOption("Accent color", "AccentColor")
-    local OutlineColor = CreateColorOption("Outline color", "OutlineColor")
-    local FontColor = CreateColorOption("Font color", "FontColor")
+    local function RefreshList()
+        local Selected = ThemeList.Value
+        ThemeList:SetValues(GetAllThemeNames())
 
-    --// Accessibility: live contrast readout for the colors above
-    ThemeManager.ContrastLabel = Themesbox:AddLabel({
-        Text = "Contrast check: n/a",
-        DoesWrap = true,
-    })
+        if Selected and table.find(ThemeList.Values, Selected) then
+            ThemeList:SetValue(Selected)
+        end
+    end
 
-    Themesbox:AddDropdown("FontFace", {
-        Text = "Font Face",
-        Default = "Code",
-        
-        Values = { "BuilderSans", "Code", "Fantasy", "Gotham", "Jura", "Roboto", "RobotoMono", "SourceSans" },
-        AllowNull = false,
-        Multi = false
-    })
-    
-    Themesbox:AddInput("BackgroundImage", { 
-        Text = "Background Image",
+    --// The picked theme wins; otherwise fall back to whatever is typed in the name box
+    local function GetTargetTheme(): string?
+        if not IsStringEmpty(ThemeList.Value) then
+            return ThemeList.Value
+        end
 
-        Default = "",
-        Finished = true,
-        ClearTextOnFocus = false,
-        ClearTextOnBlur = false
-    })
+        local Typed = Trim(ThemeNameInput.Value or "")
+        if not IsStringEmpty(Typed) then
+            return Typed
+        end
 
-    Themesbox:AddDivider()
+        return nil
+    end
 
-    Themesbox:AddDropdown("ThemeManager_ThemeList", { 
-        Text = "Theme list", 
+    local ColorOptions = {}
+    local function CreateColorOption(Text, SchemeIndex)
+        Themesbox:AddLabel(Text):AddColorPicker(SchemeIndex, {
+            Default = Library:GetSchemeColor(SchemeIndex)
+        })
 
-        Values = BuiltInThemesNames,
+        table.insert(ColorOptions, Library.Options[SchemeIndex])
+    end
+
+    CreateColorOption("Accent", "AccentColor")
+    CreateColorOption("Backgrounds", "BackgroundColor")
+    CreateColorOption("Main Backgrounds", "MainColor")
+    CreateColorOption("High Contrast", "SurfaceColor")
+    CreateColorOption("Connector High Contrast", "HoverColor")
+    CreateColorOption("Page Inlines", "InlineColor")
+    CreateColorOption("Outline", "OutlineColor")
+    CreateColorOption("Dark Accent", "DarkAccentColor")
+    CreateColorOption("Toggle Low Contrast", "ToggleOffColor")
+    CreateColorOption("Text Color", "FontColor")
+    CreateColorOption("Deselected Text", "MutedFontColor")
+
+    ThemeList = Themesbox:AddDropdown("ThemeManager_ThemeList", {
+        Text = "Themes",
+
+        Values = GetAllThemeNames(),
         AllowNull = true,
         Multi = false,
-
-        FormatDisplayValue = function(Value: any)
-            if Value ~= "Default" and Value == ThemeManager.DefaultThemeName then
-                return string.format("%s (default)", Value)
-            end
-
-            return Value
-        end,
-        FormatListValue = function(Value: any)
-            if Value ~= "Default" and Value == ThemeManager.DefaultThemeName then
-                return string.format("%s (default)", Value)
-            end
-
-            return Value
-        end
     })
 
-    Themesbox:AddButton("Set as default", function()
-        local ThemeName = ThemeList.Value
-        ThemeManager:SaveDefault(ThemeName)
-
-        ThemeManager.Library:Notify(string.format("Successfully set default theme to %q", ThemeName))
-        RefreshDefaultThemeLabel()
-    end)
-
-    Themesbox:AddDivider()
-
-    CustomThemeName = Themesbox:AddInput("ThemeManager_CustomThemeName", { 
-        Text = "Custom theme name" 
+    ThemeNameInput = Themesbox:AddInput("ThemeManager_CustomThemeName", {
+        Text = "Theme Name:",
+        Placeholder = "Theme name here...",
+        ClearTextOnFocus = false,
     })
 
-    local function SaveThemeWithContrastCheck(Name: string, SuccessMessage: string, OnSaved: (() -> nil)?)
+    local function SaveThemeWithContrastCheck(Name: string)
         local function DoSave()
             local Success, ErrorMessage = ThemeManager:SaveCustomTheme(Name)
             if not Success then
-                ThemeManager.Library:Notify(string.format("Failed to save theme %q: %s", Name, ErrorMessage))
+                Library:Notify(string.format("Failed to save theme %q: %s", Name, ErrorMessage))
                 return
             end
 
-            ThemeManager.Library:Notify(string.format(SuccessMessage, Name))
-            if OnSaved then OnSaved() end
+            Library:Notify(string.format("Saved theme %q", Name))
+            RefreshList()
+            ThemeList:SetValue(Name)
         end
 
         local Report = ThemeManager:GetContrastReport()
@@ -908,15 +914,18 @@ function ThemeManager:CreateThemeManager(Themesbox: any)
         )
     end
 
-    Themesbox:AddButton("Create theme", function()
-        local Name = CustomThemeName.Value
+    --// Save / Load
+    Themesbox:AddButton("Save", function()
+        local Typed = Trim(ThemeNameInput.Value or "")
+        local Name = if IsStringEmpty(Typed) then ThemeList.Value else Typed
+
         if IsStringEmpty(Name) then
-            ThemeManager.Library:Notify("Theme name cannot be empty.")
+            Library:Notify("Type a theme name first.")
             return
         end
 
-        if string.lower(Name) == "default" then
-            ThemeManager.Library:Notify("Invalid theme name provided.")
+        if ThemeManager.BuiltInThemes[Name] then
+            Library:Notify(string.format("%q is a built-in theme, pick another name.", Name))
             return
         end
 
@@ -925,80 +934,43 @@ function ThemeManager:CreateThemeManager(Themesbox: any)
                 return ThemeManager:GetCustomTheme(Name) ~= nil
             end,
 
-            "ThemeManager_CreateTheme",
-            "Theme already exists",
-            string.format("A custom theme named %q already exists. Overwriting it will replace it with your current colors.", Name),
-
-            "Overwrite",
-            function()
-                SaveThemeWithContrastCheck(Name, "Successfully created theme %q", RefreshList)
-            end
-        )
-    end)
-
-    Themesbox:AddDivider()
-
-    CustomThemeList = Themesbox:AddDropdown("ThemeManager_CustomThemeList", { 
-        Text = "Custom themes",
-
-        Values = ThemeManager:ReloadCustomThemes(), 
-        AllowNull = true,
-        Multi = false,
-
-        FormatDisplayValue = function(Value: any)
-            if Value == ThemeManager.DefaultThemeName then
-                return string.format("%s (default)", Value)
-            end
-
-            return Value
-        end,
-        FormatListValue = function(Value: any)
-            if Value == ThemeManager.DefaultThemeName then
-                return string.format("%s (default)", Value)
-            end
-
-            return Value
-        end
-    })
-
-    Themesbox:AddButton("Load theme", function()
-        local Name = CustomThemeList.Value
-        if IsStringEmpty(Name) then
-            ThemeManager.Library:Notify("Please select a theme first.")
-            return
-        end
-
-        ThemeManager:ApplyTheme(Name)
-        ThemeManager.Library:Notify(string.format("Successfully loaded theme %q", Name))
-    end)
-
-    Themesbox:AddButton("Overwrite theme", function()
-        local Name = CustomThemeList.Value
-        if IsStringEmpty(Name) then
-            ThemeManager.Library:Notify("Please select a theme first.")
-            return
-        end
-
-        ShowDialog(
-            function(): boolean
-                return true
-            end,
-
-            "ThemeManager_OverwriteTheme",
+            "ThemeManager_SaveTheme",
             "Overwrite theme",
-            string.format("Are you sure you want to overwrite %q with your current colors? This cannot be undone.", Name),
+            string.format("A theme named %q already exists. Overwriting it will replace it with your current colors.", Name),
 
             "Overwrite",
             function()
-                SaveThemeWithContrastCheck(Name, "Successfully overwrote theme %q")
+                SaveThemeWithContrastCheck(Name)
             end
         )
+    end):AddButton("Load", function()
+        local Name = GetTargetTheme()
+        if not Name then
+            Library:Notify("Please select a theme first.")
+            return
+        end
+
+        local Success, ErrorMessage = ThemeManager:ApplyTheme(Name)
+        if not Success then
+            Library:Notify(string.format("Failed to load theme %q: %s", Name, ErrorMessage))
+            return
+        end
+
+        --// The last loaded theme comes back on the next launch
+        ThemeManager:SaveDefault(Name)
+        Library:Notify(string.format("Loaded theme %q", Name))
     end)
 
-    Themesbox:AddButton("Delete theme", function()
-        local Name = CustomThemeList.Value
-        if IsStringEmpty(Name) then
-            ThemeManager.Library:Notify("Please select a theme first.")
+    --// Delete / Refresh
+    Themesbox:AddButton("Delete", function()
+        local Name = GetTargetTheme()
+        if not Name then
+            Library:Notify("Please select a theme first.")
+            return
+        end
+
+        if ThemeManager.BuiltInThemes[Name] then
+            Library:Notify("Built-in themes can't be deleted.")
             return
         end
 
@@ -1010,142 +982,46 @@ function ThemeManager:CreateThemeManager(Themesbox: any)
             "ThemeManager_DeleteTheme",
             "Delete theme",
             string.format("Are you sure you want to delete %q? This cannot be undone.", Name),
-            
+
             "Delete",
             function()
                 local Success, ErrorMessage = ThemeManager:Delete(Name)
                 if not Success then
-                    ThemeManager.Library:Notify(string.format("Failed to delete theme: %s", ErrorMessage))
+                    Library:Notify(string.format("Failed to delete theme: %s", ErrorMessage))
                     return
                 end
 
-                ThemeManager.Library:Notify(string.format("Successfully deleted theme %q", Name))
-                RefreshDefaultThemeLabel()
+                Library:Notify(string.format("Deleted theme %q", Name))
+                ThemeNameInput:SetValue("")
+                ThemeList:SetValue(nil)
+                RefreshList()
             end
         )
-    end)
-
-    Themesbox:AddButton("Refresh list", RefreshList)
-
-    Themesbox:AddButton("Set as default", function()
-        local Name = CustomThemeList.Value
-        if IsStringEmpty(Name) then
-            ThemeManager.Library:Notify("Please select a theme first.")
-            return
-        end
-
-        ThemeManager:SaveDefault(Name)
-        ThemeManager.Library:Notify(string.format("Successfully set default theme to %q", Name))
-        RefreshDefaultThemeLabel()
-    end)
-
-    Themesbox:AddButton("Reset default", function()
-        ShowDialog(
-            function(): boolean
-                return true
-            end,
-
-            "ThemeManager_ResetDefault",
-            "Reset default theme",
-            "Are you sure you want to clear the default theme? The library will revert to its built-in default on next load.",
-            
-            "Reset",
-            function()
-                local Success, ErrorMessage = ThemeManager:DeleteDefaultTheme()
-                if not Success then
-                    ThemeManager.Library:Notify(string.format("Failed to reset default theme: %s", ErrorMessage))
-                    return
-                end
-
-                ThemeManager.Library:Notify("Successfully reset default theme.")
-                RefreshDefaultThemeLabel()
-            end
-        )
-    end)
-
-    DefaultThemeLabel = Themesbox:AddLabel("Current default theme: ...", true);
-
-    Themesbox:AddDivider()
-
-    --// Import & Export
-    Themesbox:AddInput("ThemeManager_ThemeJSON", {
-        Text = "Theme JSON"
-    })
-
-    Themesbox:AddButton("Import theme", function()
-        local ThemeJSON = ThemeJSONInput.Value
-        if IsStringEmpty(ThemeJSON) then
-            ThemeManager.Library:Notify("Theme JSON cannot be empty")
-            return
-        end
-
-        ShowDialog(
-            function(): boolean
-                return true
-            end,
-
-            "ThemeManager_ImportTheme",
-            "Import theme",
-            "Are you sure you want to import this theme? Your current colors will be overwritten.",
-
-            "Import",
-            function()
-                local Success, ErrorMessage = ThemeManager:LoadJSON(ThemeJSON)
-                if not Success then
-                    ThemeManager.Library:Notify(string.format("Failed to import theme: %s", ErrorMessage))
-                    return
-                end
-
-                ThemeManager.Library:Notify("Successfully imported theme")
-            end
-        )
-    end)
-
-    Themesbox:AddButton("Export current theme", function()
-        local EncodedData, Success, ErrorMessage = ThemeManager:SaveJSON()
-        if not Success then
-            ThemeManager.Library:Notify(ErrorMessage)
-            return
-        end
-
-        ThemeJSONInput:SetValue(EncodedData)
-        if setclipboard then
-            setclipboard(EncodedData)
-            ThemeManager.Library:Notify("Copied theme to your clipboard")
-        end
-    end)
-
-    --// Set Variables
-    CustomThemeList, CustomThemeName, ThemeList, FontFace, BackgroundImage, ThemeJSONInput =
-        ThemeManager.Library.Options.ThemeManager_CustomThemeList,
-        ThemeManager.Library.Options.ThemeManager_CustomThemeName,
-        ThemeManager.Library.Options.ThemeManager_ThemeList,
-        ThemeManager.Library.Options.FontFace,
-        ThemeManager.Library.Options.BackgroundImage,
-        ThemeManager.Library.Options.ThemeManager_ThemeJSON;
+    end):AddButton("Refresh", RefreshList)
 
     --// Handlers
-    ThemeList:OnChanged(function()
-        ThemeManager:ApplyTheme(ThemeList.Value)
+    ThemeList:OnChanged(function(Value)
+        if IsStringEmpty(Value) then
+            return
+        end
+
+        ThemeManager:ApplyTheme(Value)
+        if not ThemeManager.BuiltInThemes[Value] then
+            ThemeNameInput:SetValue(Value)
+        end
     end)
 
     local function UpdateTheme()
         ThemeManager:ThemeUpdate()
     end
 
-    BackgroundColor:OnChanged(UpdateTheme)
-    MainColor:OnChanged(UpdateTheme)
-    AccentColor:OnChanged(UpdateTheme)
-    OutlineColor:OnChanged(UpdateTheme)
-    FontColor:OnChanged(UpdateTheme)
-    FontFace:OnChanged(function(Value) ThemeManager.Library:SetFont(Enum.Font[Value]) end)
-    BackgroundImage:OnChanged(function(Value) ThemeManager.Library:SetBackgroundImage(Value) end)
+    for _, ColorOption in ColorOptions do
+        ColorOption:OnChanged(UpdateTheme)
+    end
 
     --// Load default
     ThemeManager:LoadDefault()
-    ThemeManager:UpdateContrastWarning()
     ThemeManager.AppliedToTab = true
-    RefreshDefaultThemeLabel()
 
     return Themesbox
 end
@@ -1153,8 +1029,9 @@ end
 function ThemeManager:CreateGroupBox(Tab: any, IconName: string)
     return Tab:AddGroupbox({
         Side = "Left",
-        Name = "Themes",
+        Name = "Theming",
         IconName = IconName or "paintbrush",
+        MaxHeight = 300,
     })
 end
 

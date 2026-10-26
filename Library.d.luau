@@ -818,6 +818,7 @@ export type Tab = {
             PopOut: boolean?,
             MaxPopOutHeight: number?,
             PopOutWidth: number?,
+            MaxHeight: number?,
         }
     ) -> Groupbox,
     AddLeftGroupbox: (
