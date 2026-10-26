@@ -1,5 +1,5 @@
 --// Studio dev sync: pulls the repo from `python -m http.server 34873` in the repo root
---// and rebuilds ReplicatedStorage.Sydney + StarterPlayerScripts.SydneyTest.
+--// and rebuilds ReplicatedStorage.Alexandria + StarterPlayerScripts.AlexandriaTest.
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterPlayerScripts = game:GetService("StarterPlayer"):WaitForChild("StarterPlayerScripts")
@@ -12,8 +12,8 @@ end
 
 --// In-memory stand-ins for executor file functions so the addons can run in Studio
 local FsShim = [[
-local __fs = shared.__SydneyFs or { files = {}, folders = {} }
-shared.__SydneyFs = __fs
+local __fs = shared.__AlexandriaFs or { files = {}, folders = {} }
+shared.__AlexandriaFs = __fs
 local isfolder = function(p) return __fs.folders[p] == true end
 local isfile = function(p) return __fs.files[p] ~= nil end
 local makefolder = function(p) __fs.folders[p] = true end
@@ -30,13 +30,13 @@ local clonefunction = function(f) return f end
 local getgenv = getgenv or function() return shared end
 ]]
 
-local Old = ReplicatedStorage:FindFirstChild("Sydney")
+local Old = ReplicatedStorage:FindFirstChild("Alexandria")
 if Old then Old:Destroy() end
-local OldTest = StarterPlayerScripts:FindFirstChild("SydneyTest")
+local OldTest = StarterPlayerScripts:FindFirstChild("AlexandriaTest")
 if OldTest then OldTest:Destroy() end
 
 local Folder = Instance.new("Folder")
-Folder.Name = "Sydney"
+Folder.Name = "Alexandria"
 Folder.Parent = ReplicatedStorage
 
 local ScriptEditorService = game:GetService("ScriptEditorService")
@@ -68,19 +68,19 @@ end
 
 local Example = Fetch("Example.lua")
 local Header = [[
-local Sydney = game:GetService("ReplicatedStorage"):WaitForChild("Sydney")
-local Library = require(Sydney.Library)
-if Sydney:FindFirstChild("Icons") then
-	Library:SetIconModule(require(Sydney.Icons))
+local Alexandria = game:GetService("ReplicatedStorage"):WaitForChild("Alexandria")
+local Library = require(Alexandria.Library)
+if Alexandria:FindFirstChild("Icons") then
+	Library:SetIconModule(require(Alexandria.Icons))
 end
-local ThemeManager = require(Sydney.ThemeManager)
-local SaveManager = require(Sydney.SaveManager)
+local ThemeManager = require(Alexandria.ThemeManager)
+local SaveManager = require(Alexandria.SaveManager)
 ]]
 local Lines = string.split(Example, "\n")
 local Body = table.concat(Lines, "\n", 9)
 
 local Test = Instance.new("LocalScript")
-Test.Name = "SydneyTest"
+Test.Name = "AlexandriaTest"
 Test.Parent = StarterPlayerScripts
 SetSource(Test, Header .. Body)
 

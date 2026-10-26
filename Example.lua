@@ -1,7 +1,7 @@
--- Sydney example: a tour of every element, the header, theming and configs.
+-- Alexandria example: a tour of every element, the header, theming and configs.
 -- Point `repo` at your own fork if you host the files somewhere else.
 
-local repo = "https://raw.githubusercontent.com/joustingmatch/Sydney/main/"
+local repo = "https://raw.githubusercontent.com/joustingmatch/Alexandria/main/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
 local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
@@ -11,8 +11,8 @@ local Toggles = Library.Toggles
 
 --// Window \\--
 local Window = Library:CreateWindow({
-	Title = "Sydney",
-	Footer = "sydney · example", -- centred
+	Title = "Alexandria",
+	Footer = "alexandria · example", -- centred
 	FooterLeft = "discord.gg/example", -- optional corner texts; change later with
 	FooterRight = "Build: dev", --         Window:SetFooterLeft / SetFooterRight
 
@@ -395,7 +395,7 @@ Header:AddDropdown("BadgeText", {
 
 Header:AddInput("TitleText", {
 	Text = "Title",
-	Default = "Sydney",
+	Default = "Alexandria",
 	ClearTextOnFocus = false,
 	Callback = function(Value)
 		Window:ChangeTitle(Value)
@@ -407,14 +407,14 @@ Header:AddInput("TitleText", {
 --============================================================================--
 
 Tabs.Key:AddLabel({
-	Text = "Key: Sydney",
+	Text = "Key: Alexandria",
 	DoesWrap = true,
 	Size = 16,
 })
 
 Tabs.Key:AddKeyBox(function(ReceivedKey)
 	-- AddKeyBox only gives you the typed key; checking it is up to you
-	local Success = ReceivedKey == "Sydney"
+	local Success = ReceivedKey == "Alexandria"
 
 	Library:Notify({
 		Title = Success and "Key accepted" or "Wrong key",
@@ -508,8 +508,8 @@ SaveManager:IgnoreThemeSettings() -- configs shouldn't carry theme colors
 SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
 
 -- Themes live in a shared folder, configs per game (and per place if you want)
-ThemeManager:SetFolder("Sydney")
-SaveManager:SetFolder("Sydney/example-game")
+ThemeManager:SetFolder("Alexandria")
+SaveManager:SetFolder("Alexandria/example-game")
 
 SaveManager:BuildConfigSection(Tabs.Settings) -- right side
 ThemeManager:ApplyToTab(Tabs.Settings) -- left side, under Menu
@@ -530,5 +530,5 @@ Options.WalkSpeed:OnChanged(function(Value)
 end)
 
 Library:OnUnload(function()
-	print("Sydney unloaded")
+	print("Alexandria unloaded")
 end)
