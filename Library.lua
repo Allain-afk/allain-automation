@@ -200,7 +200,7 @@ local Library = {
     --// Notifications \\--
     Notifications = {},
     NotifySide = "Right",
-    NotifyTweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+    NotifyTweenInfo = TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
 
     --// Dialogues \\--
     Dialogues = {},
@@ -4080,18 +4080,19 @@ end))
 
 --// Tooltip \\--
 local TooltipLabel = New("TextLabel", {
-    BackgroundColor3 = "BackgroundColor",
-    TextSize = 14,
+    BackgroundColor3 = "SurfaceColor",
+    TextSize = 12,
     TextWrapped = true,
+    TextXAlignment = Enum.TextXAlignment.Left,
     Visible = false,
     ZIndex = 30,
     Parent = ScreenGui,
 })
 New("UIPadding", {
-    PaddingBottom = UDim.new(0, 2),
-    PaddingLeft = UDim.new(0, 4),
-    PaddingRight = UDim.new(0, 4),
-    PaddingTop = UDim.new(0, 2),
+    PaddingBottom = UDim.new(0, 5),
+    PaddingLeft = UDim.new(0, 8),
+    PaddingRight = UDim.new(0, 8),
+    PaddingTop = UDim.new(0, 5),
     Parent = TooltipLabel,
 })
 table.insert(
@@ -4100,7 +4101,7 @@ table.insert(
         Parent = TooltipLabel,
     })
 )
-New("UIStroke", {
+local TooltipStroke = New("UIStroke", {
     Color = "OutlineColor",
     Parent = TooltipLabel,
 })
@@ -4146,7 +4147,7 @@ local function UpdateTooltipSize(Force: boolean?)
 
     LastTooltipText = Text
     LastTooltipMaxWidth = MaxWidth
-    TooltipLabel.Size = UDim2.fromOffset(X + 8, Y + 4)
+    TooltipLabel.Size = UDim2.fromOffset(X + 16, Y + 10)
 end
 
 TooltipLabel:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
@@ -4180,13 +4181,30 @@ function Library:AddTooltip(InfoStr: string, DisabledInfoStr: string, HoverInsta
             TooltipLabel.Parent = ScreenGui
         end
 
+        local function CursorAnchor()
+            return Vector2.new(
+                Mouse.X + (Library.ShowCustomCursor and 10 or 14),
+                Mouse.Y + (Library.ShowCustomCursor and 10 or 12)
+            )
+        end
+
+        --// Fade in from slightly below the cursor, then trail it with a little easing
+        local Current = CursorAnchor() + Vector2.new(0, 4)
         TooltipLabel.Text = TooltipTable.Disabled and DisabledInfoStr or InfoStr
-        TooltipLabel.Position = UDim2.fromOffset(
-            Mouse.X + (Library.ShowCustomCursor and 8 or 14),
-            Mouse.Y + (Library.ShowCustomCursor and 8 or 12)
-        )
+        TooltipLabel.Position = UDim2.fromOffset(Current.X, Current.Y)
+        TooltipLabel.BackgroundTransparency = 1
+        TooltipLabel.TextTransparency = 1
+        TooltipStroke.Transparency = 1
         TooltipLabel.Visible = true
         UpdateTooltipSize(true)
+
+        TweenService:Create(TooltipLabel, Library.HoverTweenInfo, {
+            BackgroundTransparency = 0,
+            TextTransparency = 0,
+        }):Play()
+        TweenService:Create(TooltipStroke, Library.HoverTweenInfo, {
+            Transparency = 0,
+        }):Play()
 
         while
             (Library.Toggled or Library.ActiveLoading)
@@ -4194,12 +4212,9 @@ function Library:AddTooltip(InfoStr: string, DisabledInfoStr: string, HoverInsta
             and Library:MouseIsOverFrame(HoverInstance, Mouse)
             and not (CurrentMenu and Library:MouseIsOverFrame(CurrentMenu.Menu, Mouse))
         do
-            TooltipLabel.Position = UDim2.fromOffset(
-                Mouse.X + (Library.ShowCustomCursor and 8 or 14),
-                Mouse.Y + (Library.ShowCustomCursor and 8 or 12)
-            )
-
-            RunService.RenderStepped:Wait()
+            local DeltaTime = RunService.RenderStepped:Wait()
+            Current = Current:Lerp(CursorAnchor(), math.clamp(DeltaTime * 22, 0, 1))
+            TooltipLabel.Position = UDim2.fromOffset(Current.X, Current.Y)
         end
 
         TooltipLabel.Visible = false
@@ -4501,10 +4516,11 @@ do
 
         local Picker = New("TextButton", {
             BackgroundColor3 = "MainColor",
+            FontFace = "FontMedium",
             Size = UDim2.fromOffset(18, 18),
             Text = (IsForButton and SlideOverflow) and "" or KeyPicker.Value,
-            TextSize = 14,
-            TextTransparency = 0.4,
+            TextSize = 12,
+            TextTransparency = 0.35,
             Parent = ToggleLabel,
         })
 
@@ -4513,16 +4529,17 @@ do
 
             SlidingLabel = New("TextLabel", {
                 BackgroundTransparency = 1,
+                FontFace = "FontMedium",
                 Size = UDim2.new(1, 0, 1, 0),
                 Position = UDim2.new(0, 0, 0, 0),
                 Text = KeyPicker.Value,
-                TextSize = 14,
+                TextSize = 12,
                 TextXAlignment = Enum.TextXAlignment.Center,
                 Parent = Picker,
             })
         end
 
-        New("UIStroke", {
+        local PickerStroke = New("UIStroke", {
             Color = "OutlineColor",
             Parent = Picker,
         })
@@ -4550,16 +4567,21 @@ do
         local function TweenPickerTextTransparency(Transparency: number)
             StopTween(PickerHoverTween)
 
-            PickerHoverTween = TweenService:Create(Picker, Library.TweenInfo, {
+            PickerHoverTween = TweenService:Create(Picker, Library.HoverTweenInfo, {
                 TextTransparency = Transparency,
             })
             PickerHoverTween:Play()
 
             if SlidingLabel then
-                TweenService:Create(SlidingLabel, Library.TweenInfo, {
+                TweenService:Create(SlidingLabel, Library.HoverTweenInfo, {
                     TextTransparency = Transparency,
                 }):Play()
             end
+
+            --// The edge lifts together with the text on hover
+            TweenService:Create(PickerStroke, Library.HoverTweenInfo, {
+                Color = Transparency == 0 and Library:GetLighterColor(Library.Scheme.OutlineColor) or Library.Scheme.OutlineColor,
+            }):Play()
         end
 
         table.insert(KeyPicker.Connections, Picker.MouseEnter:Connect(function()
@@ -4575,7 +4597,7 @@ do
                 return
             end
 
-            TweenPickerTextTransparency(0.4)
+            TweenPickerTextTransparency(0.35)
         end))
 
         if IsForButton then
@@ -4801,9 +4823,10 @@ do
             local Button = New("TextButton", {
                 BackgroundColor3 = "MainColor",
                 BackgroundTransparency = 1,
-                Size = UDim2.new(1, 0, 0, IsForButton and 21 or (TotalModeButtons == 1 and 18 or 19)),
+                FontFace = "FontMedium",
+                Size = UDim2.new(1, 0, 0, IsForButton and 22 or 20),
                 Text = Mode,
-                TextSize = 14,
+                TextSize = 12,
                 TextTransparency = 0.5,
                 Parent = MenuTable.Menu,
             })
@@ -5009,7 +5032,7 @@ do
                     ToggleLabel.AbsoluteSize.X / Library.DPIScale
                 )
                 Picker.Text = DisplayText
-                Picker.Size = IsForButton and UDim2.new(0, X + 9, 1, 0) or UDim2.fromOffset((X + 9), (Y + 4))
+                Picker.Size = IsForButton and UDim2.new(0, X + 12, 1, 0) or UDim2.fromOffset((X + 12), (Y + 6))
             end
         end
 
@@ -11034,7 +11057,7 @@ function Library:Notify(...)
 
     local Holder = New("Frame", {
         AutomaticSize = Enum.AutomaticSize.Y,
-        BackgroundColor3 = "MainColor",
+        BackgroundColor3 = "SurfaceColor",
         Position = Library.NotifySide:lower() == "left" and UDim2.new(-1, -8, 0, 0) or UDim2.new(1, 8, 0, 0),
         Size = UDim2.new(1, 0, 0, 0),
         ZIndex = 5,
@@ -11056,14 +11079,14 @@ function Library:Notify(...)
         Parent = Holder,
     })
     New("UIListLayout", {
-        Padding = UDim.new(0, 4),
+        Padding = UDim.new(0, 6),
         Parent = ContentHolder,
     })
     New("UIPadding", {
-        PaddingBottom = UDim.new(0, 8),
-        PaddingLeft = UDim.new(0, 8),
-        PaddingRight = UDim.new(0, 8),
-        PaddingTop = UDim.new(0, 8),
+        PaddingBottom = UDim.new(0, 10),
+        PaddingLeft = UDim.new(0, 12),
+        PaddingRight = UDim.new(0, 12),
+        PaddingTop = UDim.new(0, 10),
         Parent = ContentHolder,
     })
 
@@ -11077,20 +11100,20 @@ function Library:Notify(...)
             ImageRectOffset = CloseIcon and CloseIcon.ImageRectOffset or Vector2.zero,
             ImageRectSize = CloseIcon and CloseIcon.ImageRectSize or Vector2.zero,
             ImageTransparency = 0.5,
-            Position = UDim2.new(1, -8, 0, 8),
-            Size = UDim2.fromOffset(14, 14),
+            Position = UDim2.new(1, -10, 0, 10),
+            Size = UDim2.fromOffset(13, 13),
             ZIndex = 6,
             Parent = Holder,
         })
         Library:ApplyLucideIcon(CloseButton, CloseIcon)
 
         CloseButton.MouseEnter:Connect(function()
-            TweenService:Create(CloseButton, Library.TweenInfo, {
+            TweenService:Create(CloseButton, Library.HoverTweenInfo, {
                 ImageTransparency = 0,
             }):Play()
         end)
         CloseButton.MouseLeave:Connect(function()
-            TweenService:Create(CloseButton, Library.TweenInfo, {
+            TweenService:Create(CloseButton, Library.HoverTweenInfo, {
                 ImageTransparency = 0.5,
             }):Play()
         end)
@@ -11179,9 +11202,10 @@ function Library:Notify(...)
             AnchorPoint = Vector2.new(0, 0.5),
             Position = UDim2.new(0, (IconLabel and 21 or 0), 0.5, 0),
             Size = UDim2.fromScale(0, 0),
+            FontFace = "FontBold",
             Text = Data.Title,
             TextColor3 = Data.TitleColor or "FontColor",
-            TextSize = 15,
+            TextSize = 13,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextYAlignment = Enum.TextYAlignment.Center,
             TextWrapped = true,
@@ -11195,8 +11219,8 @@ function Library:Notify(...)
             BackgroundTransparency = 1,
             Size = UDim2.fromScale(0, 0),
             Text = Data.Description,
-            TextColor3 = Data.DescriptionColor or "FontColor",
-            TextSize = 14,
+            TextColor3 = Data.DescriptionColor or (Data.Title and "MutedFontColor" or "FontColor"),
+            TextSize = 12,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextWrapped = true,
             Parent = TextContainer,
@@ -11209,7 +11233,7 @@ function Library:Notify(...)
         local CloseWidth = Data.Closable and 20 or 0
         local MaxTextWidth = math.max(
             40,
-            (NotificationArea.AbsoluteSize.X / Library.DPIScale) - 24 - ExtraWidth - CloseWidth
+            (NotificationArea.AbsoluteSize.X / Library.DPIScale) - 32 - ExtraWidth - CloseWidth
         )
 
         if Title then
@@ -11225,7 +11249,7 @@ function Library:Notify(...)
             DescX = X
         end
 
-        FakeBackground.Size = UDim2.fromOffset(math.max(TitleX, DescX) + 24 + ExtraWidth + CloseWidth, 0)
+        FakeBackground.Size = UDim2.fromOffset(math.max(TitleX, DescX) + 32 + ExtraWidth + CloseWidth, 0)
 
         if Library.Notifications[FakeBackground] then
             task.defer(function()
@@ -11268,7 +11292,9 @@ function Library:Notify(...)
     function Data:ChangeStep(NewStep)
         if TimerFill and Data.Steps then
             NewStep = math.clamp(NewStep or 0, 0, Data.Steps)
-            TimerFill.Size = UDim2.fromScale(NewStep / Data.Steps, 1)
+            TweenService:Create(TimerFill, Library.GlideTweenInfo, {
+                Size = UDim2.fromScale(NewStep / Data.Steps, 1),
+            }):Play()
         end
     end
 
@@ -11313,24 +11339,31 @@ function Library:Notify(...)
         end)
     end
 
+    --// Timer: a hairline pill that drains toward the left
     local TimerHolder = New("Frame", {
         BackgroundTransparency = 1,
-        Size = UDim2.new(1, 0, 0, 7),
+        Size = UDim2.new(1, 0, 0, 5),
         Visible = (Data.Persist ~= true and typeof(Data.Time) ~= "Instance") or typeof(Data.Steps) == "number",
         Parent = ContentHolder,
     })
     local TimerBar = New("Frame", {
-        BackgroundColor3 = "BackgroundColor",
-        BorderColor3 = "OutlineColor",
-        BorderSizePixel = 1,
-        Position = UDim2.fromOffset(0, 3),
-        Size = UDim2.new(1, 0, 0, 2),
+        BackgroundColor3 = "MainColor",
+        Position = UDim2.fromOffset(0, 2),
+        Size = UDim2.new(1, 0, 0, 3),
         Parent = TimerHolder,
+    })
+    New("UICorner", {
+        CornerRadius = UDim.new(1, 0),
+        Parent = TimerBar,
     })
     TimerFill = New("Frame", {
         BackgroundColor3 = "AccentColor",
         Size = UDim2.fromScale(1, 1),
         Parent = TimerBar,
+    })
+    New("UICorner", {
+        CornerRadius = UDim.new(1, 0),
+        Parent = TimerFill,
     })
 
     if typeof(Data.Time) == "Instance" then
@@ -14069,13 +14102,13 @@ function Library:CreateWindow(WindowInfo)
             Visible = true,
             Parent = MainFrame,
         })
-        TweenService:Create(DialogOverlay, Library.TweenInfo, {
-            BackgroundTransparency = 0.5,
+        TweenService:Create(DialogOverlay, Library.GlideTweenInfo, {
+            BackgroundTransparency = 0.45,
         }):Play()
 
         DialogFrame = New("TextButton", {
             AnchorPoint = Vector2.new(0.5, 0.5),
-            BackgroundColor3 = "BackgroundColor",
+            BackgroundColor3 = "SurfaceColor",
             Position = UDim2.fromScale(0.5, 0.5),
             Size = UDim2.fromOffset(300, 0),
             AutomaticSize = Enum.AutomaticSize.Y,
@@ -14100,11 +14133,12 @@ function Library:CreateWindow(WindowInfo)
             ZIndex = 2,
             Parent = DialogFrame,
         })
+        --// Settles in from slightly smaller, on the same glide curve as the rest of the UI
         local DialogScale = New("UIScale", {
-            Scale = 0.95,
+            Scale = 0.94,
             Parent = DialogFrame,
         })
-        TweenService:Create(DialogScale, Library.TweenInfo, {
+        TweenService:Create(DialogScale, Library.GlideTweenInfo, {
             Scale = 1
         }):Play()
         local _InnerPadding = New("UIPadding", {
@@ -14171,10 +14205,11 @@ function Library:CreateWindow(WindowInfo)
 
         local TitleLabel = New("TextLabel", {
             BackgroundTransparency = 1,
+            FontFace = "FontBold",
             Size = UDim2.new(1, 0, 0, 18),
             AutomaticSize = Enum.AutomaticSize.Y,
             Text = Info.Title,
-            TextSize = 18,
+            TextSize = 15,
             TextColor3 = Info.TitleColor or "FontColor",
             TextXAlignment = Enum.TextXAlignment.Left,
             LayoutOrder = 2,
@@ -14187,10 +14222,9 @@ function Library:CreateWindow(WindowInfo)
             Size = UDim2.new(1, 0, 0, 14),
             AutomaticSize = Enum.AutomaticSize.Y,
             Text = Info.Description,
-            TextSize = 14,
-            TextTransparency = Info.DescriptionColor and 0 or 0.2,
+            TextSize = 13,
             TextXAlignment = Enum.TextXAlignment.Left,
-            TextColor3 = Info.DescriptionColor or "FontColor",
+            TextColor3 = Info.DescriptionColor or "MutedFontColor",
             TextWrapped = true,
             LayoutOrder = 2,
             ZIndex = 2,
@@ -14275,7 +14309,7 @@ function Library:CreateWindow(WindowInfo)
 
             DialogFrame.Size = UDim2.fromOffset(TargetWidth, 0)
 
-            local _DescX, DescY = Library:GetTextBounds(DescriptionLabel.Text, Library.Scheme.Font, 14, TargetWidth - 30)
+            local _DescX, DescY = Library:GetTextBounds(DescriptionLabel.Text, DescriptionLabel.FontFace, DescriptionLabel.TextSize, TargetWidth - 30)
             DescriptionLabel.Size = UDim2.new(1, 0, 0, DescY)
 
             local HasElements = false
@@ -14320,7 +14354,7 @@ function Library:CreateWindow(WindowInfo)
             end
             table.clear(Dialog.Elements)
 
-            local CloseTween = TweenService:Create(DialogScale, Library.TweenInfo, { Scale = 0.95 })
+            local CloseTween = TweenService:Create(DialogScale, Library.TweenInfo, { Scale = 0.94 })
             TweenService:Create(DialogOverlay, Library.TweenInfo, { BackgroundTransparency = 1 }):Play()
             CloseTween:Play()
 
