@@ -6458,11 +6458,7 @@ do
             end))
         end
 
-        table.insert(ColorPicker.Connections, HueBox.FocusLost:Connect(function(Enter)
-            if not Enter then
-                return
-            end
-
+        table.insert(ColorPicker.Connections, HueBox.FocusLost:Connect(function()
             local Success, Color = pcall(Color3.fromHex, HueBox.Text)
             if Success and typeof(Color) == "Color3" then
                 ColorPicker.Hue, ColorPicker.Sat, ColorPicker.Vib = Color:ToHSV()
@@ -6471,11 +6467,7 @@ do
             ColorPicker:Update()
         end))
 
-        table.insert(ColorPicker.Connections, RgbBox.FocusLost:Connect(function(Enter)
-            if not Enter then
-                return
-            end
-
+        table.insert(ColorPicker.Connections, RgbBox.FocusLost:Connect(function()
             local R, G, B = RgbBox.Text:match("(%d+),%s*(%d+),%s*(%d+)")
             if R and G and B then
                 ColorPicker:SetHSVFromRGB(Color3.fromRGB(R, G, B))
@@ -7838,15 +7830,7 @@ do
         end
 
         if Input.Finished then
-            table.insert(Input.Connections, Box.FocusLost:Connect(function(Enter)
-                if not Enter then
-                    if Input.ClearTextOnBlur then
-                        Box.Text = Input.Value
-                    end
-
-                    return
-                end
-
+            table.insert(Input.Connections, Box.FocusLost:Connect(function()
                 Input:SetValue(Box.Text)
             end))
         else
