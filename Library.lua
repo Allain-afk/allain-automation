@@ -13984,99 +13984,363 @@ function Library:CreateWindow(WindowInfo)
             Container = TabContainer
         }
 
-        function Tab:AddKeyBox(Callback)
-            assert(typeof(Callback) == "function", "Callback must be a function")
+        --// AddKeyBox(Callback) -> Callback(Key)
+        --// AddKeyBox(ExpectedKey, Callback) -> Callback(Success, Key)
+        --// AddKeyBox(Info) -> card with title, status, Get key / Premium buttons and optional saved key
+        function Tab:AddKeyBox(...)
+            local Info
+            if typeof(...) == "table" then
+                Info = select(1, ...)
+            elseif typeof(...) == "function" then
+                Info = { Callback = select(1, ...), Legacy = true }
+            else
+                Info = { ExpectedKey = select(1, ...), Callback = select(2, ...) }
+            end
 
-            local Holder = New("Frame", {
-                BackgroundTransparency = 1,
-                Size = UDim2.new(0.75, 0, 0, 21),
+            assert(typeof(Info.Callback) == "function" or Info.ExpectedKey or Info.Validate, "AddKeyBox needs a Callback, ExpectedKey or Validate")
+
+            local Checking = false
+            local KeyBox = {}
+
+            local function Corner(Parent, Radius)
+                table.insert(
+                    Library.Corners,
+                    New("UICorner", {
+                        CornerRadius = UDim.new(0, Radius or Library.CornerRadius),
+                        Parent = Parent,
+                    })
+                )
+            end
+
+            local function Recolor(Instance, Property, Key)
+                Library.Registry[Instance][Property] = Key
+                TweenService:Create(Instance, Library.TweenInfo, {
+                    [Property] = Library.Scheme[Key],
+                }):Play()
+            end
+
+            --// Card \\--
+            local Card = New("Frame", {
+                AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundColor3 = "BackgroundColor",
+                Size = UDim2.new(1, -16, 0, 0),
                 Parent = TabContainer,
             })
-
-            local Box = New("TextBox", {
-                BackgroundColor3 = "MainColor",
-                PlaceholderText = "Key",
-                Size = UDim2.new(1, -71, 1, 0),
-                TextSize = 14,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                Parent = Holder,
-            })
-            New("UIPadding", {
-                PaddingLeft = UDim.new(0, 8),
-                PaddingRight = UDim.new(0, 8),
-                Parent = Box,
-            })
-            local BoxStroke = New("UIStroke", {
-                Color = "OutlineColor",
-                Parent = Box,
-            })
-            table.insert(
-                Library.Corners,
-                New("UICorner", {
-                    CornerRadius = UDim.new(0, Library.CornerRadius / 2),
-                    Parent = Box,
-                })
-            )
-
-            Box.Focused:Connect(function()
-                Library.Registry[BoxStroke].Color = "AccentColor"
-                TweenService:Create(BoxStroke, Library.TweenInfo, {
-                    Color = Library.Scheme.AccentColor,
-                }):Play()
-            end)
-
-            Box.FocusLost:Connect(function()
-                Library.Registry[BoxStroke].Color = "OutlineColor"
-                TweenService:Create(BoxStroke, Library.TweenInfo, {
-                    Color = Library.Scheme.OutlineColor,
-                }):Play()
-            end)
-
-            local Button = New("TextButton", {
-                AnchorPoint = Vector2.new(1, 0),
-                BackgroundColor3 = "MainColor",
-                Position = UDim2.fromScale(1, 0),
-                Size = UDim2.new(0, 63, 1, 0),
-                Text = "Execute",
-                TextSize = 14,
-                TextTransparency = 0.4,
-                Parent = Holder,
+            New("UISizeConstraint", {
+                MaxSize = Vector2.new(360, math.huge),
+                Parent = Card,
             })
             New("UIStroke", {
                 Color = "OutlineColor",
-                Parent = Button,
+                Parent = Card,
             })
-            table.insert(
-                Library.Corners,
-                New("UICorner", {
-                    CornerRadius = UDim.new(0, Library.CornerRadius / 2),
-                    Parent = Button,
+            Corner(Card)
+            New("UIPadding", {
+                PaddingBottom = UDim.new(0, 16),
+                PaddingLeft = UDim.new(0, 18),
+                PaddingRight = UDim.new(0, 18),
+                PaddingTop = UDim.new(0, 16),
+                Parent = Card,
+            })
+            New("UIListLayout", {
+                Padding = UDim.new(0, 10),
+                Parent = Card,
+            })
+
+            local function Label(Text, Size, Color, Order, Font)
+                return New("TextLabel", {
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    BackgroundTransparency = 1,
+                    FontFace = Font or "Font",
+                    LayoutOrder = Order,
+                    Size = UDim2.fromScale(1, 0),
+                    Text = Text,
+                    TextColor3 = Color,
+                    TextSize = Size,
+                    TextWrapped = true,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Parent = Card,
                 })
-            )
+            end
 
-            Button.MouseEnter:Connect(function()
-                TweenService:Create(Button, Library.TweenInfo, {
-                    TextTransparency = 0,
-                }):Play()
-            end)
+            --// Header \\--
+            local Header = New("Frame", {
+                AutomaticSize = Enum.AutomaticSize.Y,
+                BackgroundTransparency = 1,
+                LayoutOrder = 1,
+                Size = UDim2.fromScale(1, 0),
+                Parent = Card,
+            })
+            New("UIListLayout", {
+                Padding = UDim.new(0, 3),
+                Parent = Header,
+            })
 
-            Button.MouseLeave:Connect(function()
-                TweenService:Create(Button, Library.TweenInfo, {
-                    TextTransparency = 0.4,
-                }):Play()
-            end)
+            local TitleRow = New("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 20),
+                Parent = Header,
+            })
+            New("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal,
+                Padding = UDim.new(0, 7),
+                VerticalAlignment = Enum.VerticalAlignment.Center,
+                Parent = TitleRow,
+            })
+            New("TextLabel", {
+                AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1,
+                FontFace = "FontBold",
+                Size = UDim2.fromScale(0, 1),
+                Text = Info.Title or Name,
+                TextSize = 16,
+                Parent = TitleRow,
+            })
+            local Dot = New("Frame", {
+                BackgroundColor3 = "AccentColor",
+                LayoutOrder = 1,
+                Size = UDim2.fromOffset(7, 7),
+                Parent = TitleRow,
+            })
+            Corner(Dot, 4)
 
-            Button.InputBegan:Connect(function(Input)
-                if not IsClickInput(Input) then
+            if Info.Subtitle then
+                New("TextLabel", {
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.fromScale(1, 0),
+                    Text = Info.Subtitle,
+                    TextColor3 = "MutedFontColor",
+                    TextSize = 13,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Parent = Header,
+                })
+            end
+
+            New("Frame", {
+                BackgroundColor3 = "OutlineColor",
+                LayoutOrder = 2,
+                Size = UDim2.new(1, 0, 0, 1),
+                Parent = Card,
+            })
+
+            Label(Info.Text or "Enter your key to continue.", 13, "MutedFontColor", 3)
+
+            --// Input \\--
+            local Box = New("TextBox", {
+                BackgroundColor3 = "MainColor",
+                ClearTextOnFocus = false,
+                LayoutOrder = 4,
+                PlaceholderText = Info.Placeholder or "your key...",
+                Size = UDim2.new(1, 0, 0, 32),
+                TextSize = 14,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = Card,
+            })
+            New("UIPadding", {
+                PaddingLeft = UDim.new(0, 10),
+                PaddingRight = UDim.new(0, 10),
+                Parent = Box,
+            })
+            local BoxStroke = New("UIStroke", {
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                Color = "OutlineColor",
+                Parent = Box,
+            })
+            Corner(Box)
+
+            local Status = Label("", 12, "RedColor", 5)
+            Status.Visible = false
+
+            --// Buttons \\--
+            local function MakeButton(Text, Primary, Parent, Order, Size)
+                local BgKey = Primary and "AccentColor" or "MainColor"
+                local Button = New("TextButton", {
+                    BackgroundColor3 = BgKey,
+                    FontFace = "FontBold",
+                    LayoutOrder = Order,
+                    Size = Size,
+                    Text = Text,
+                    TextColor3 = Primary and "BackgroundColor" or "FontColor",
+                    TextSize = 14,
+                    Parent = Parent,
+                })
+                Corner(Button)
+                if not Primary then
+                    New("UIStroke", {
+                        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                        Color = "OutlineColor",
+                        Parent = Button,
+                    })
+                end
+
+                local Scale = New("UIScale", { Parent = Button })
+                BindInteraction(Button, {
+                    Scale = Scale,
+                    PressScale = 0.97,
+                    Enabled = function()
+                        return not Checking
+                    end,
+                    OnHover = function(Hovering)
+                        local Base = Library.Scheme[BgKey]
+                        TweenService:Create(Button, Library.TweenInfo, {
+                            BackgroundColor3 = Hovering and Library:GetBetterColor(Base, Primary and -12 or 8) or Base,
+                        }):Play()
+                    end,
+                })
+
+                return Button
+            end
+
+            local CheckText = Info.ButtonText or "Check key"
+            local CheckButton = MakeButton(CheckText, true, Card, 6, UDim2.new(1, 0, 0, 32))
+
+            local function RunAction(Action, Copied)
+                if typeof(Action) == "function" then
+                    Action()
+                elseif typeof(Action) == "string" then
+                    if setclipboard then
+                        setclipboard(Action)
+                    end
+                    Library:Notify({
+                        Title = Copied,
+                        Description = setclipboard and "Link copied to clipboard." or Action,
+                        Time = 3,
+                    })
+                end
+            end
+
+            local Secondary = {}
+            if Info.GetKey then
+                table.insert(Secondary, { Info.GetKeyText or "Get key", Info.GetKey })
+            end
+            if Info.Premium then
+                table.insert(Secondary, { Info.PremiumText or "Buy premium", Info.Premium })
+            end
+
+            if #Secondary > 0 then
+                local Row = New("Frame", {
+                    BackgroundTransparency = 1,
+                    LayoutOrder = 7,
+                    Size = UDim2.new(1, 0, 0, 30),
+                    Parent = Card,
+                })
+                New("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal,
+                    Padding = UDim.new(0, 8),
+                    Parent = Row,
+                })
+
+                local Gap = 8 * (#Secondary - 1) / #Secondary
+                for Index, Entry in Secondary do
+                    local Button = MakeButton(Entry[1], false, Row, Index, UDim2.new(1 / #Secondary, -Gap, 1, 0))
+                    Button.MouseButton1Click:Connect(function()
+                        RunAction(Entry[2], Entry[1])
+                    end)
+                end
+            end
+
+            if Info.Footer then
+                Label(Info.Footer, 12, "MutedFontColor", 8)
+            end
+
+            --// Logic \\--
+            function KeyBox:SetStatus(Text: string?, Success: boolean?)
+                Status.Visible = Text ~= nil and Text ~= ""
+                Status.Text = Text or ""
+                Recolor(Status, "TextColor3", Success and "AccentColor" or "RedColor")
+                Recolor(BoxStroke, "Color", if Text == nil or Text == "" then "OutlineColor" elseif Success then "AccentColor" else "RedColor")
+            end
+
+            local function Validate(Key)
+                if Info.Validate then
+                    return Info.Validate(Key)
+                end
+
+                local Expected = Info.ExpectedKey
+                if typeof(Expected) == "table" then
+                    return table.find(Expected, Key) ~= nil
+                end
+
+                return Key == Expected
+            end
+
+            function KeyBox:Submit()
+                if Checking then
                     return
                 end
 
-                if not Library:MouseIsOverFrame(Button, Input.Position) then
+                local Key = Box.Text:gsub("^%s+", ""):gsub("%s+$", "")
+                if Key == "" then
+                    KeyBox:SetStatus("Enter a key first.", false)
                     return
                 end
 
-                Callback(Box.Text)
+                if Info.Legacy then
+                    Info.Callback(Key)
+                    return
+                end
+
+                Checking = true
+                CheckButton.Text = "Checking..."
+                KeyBox:SetStatus(nil)
+
+                task.spawn(function()
+                    local Ok, Success, Message = pcall(Validate, Key)
+                    if not Ok then
+                        Success, Message = false, "Couldn't check key."
+                    end
+                    Success = Success == true
+
+                    Checking = false
+                    CheckButton.Text = CheckText
+                    KeyBox:SetStatus(Message or (Success and "Key accepted." or "Invalid key."), Success)
+
+                    if Success and Info.SaveKey and writefile then
+                        pcall(writefile, Info.SaveKey, Key)
+                    end
+
+                    if Info.Callback then
+                        Info.Callback(Success, Key)
+                    end
+                end)
+            end
+
+            Box.Focused:Connect(function()
+                if not Status.Visible then
+                    Recolor(BoxStroke, "Color", "AccentColor")
+                end
             end)
+            Box.FocusLost:Connect(function(EnterPressed)
+                if not Status.Visible then
+                    Recolor(BoxStroke, "Color", "OutlineColor")
+                end
+                if EnterPressed then
+                    KeyBox:Submit()
+                end
+            end)
+            Box:GetPropertyChangedSignal("Text"):Connect(function()
+                if Status.Visible and not Checking then
+                    KeyBox:SetStatus(nil)
+                end
+            end)
+            CheckButton.MouseButton1Click:Connect(KeyBox.Submit)
+
+            --// Saved key: prefill and check it straight away \\--
+            if Info.SaveKey and isfile and readfile then
+                local Ok, Saved = pcall(function()
+                    return isfile(Info.SaveKey) and readfile(Info.SaveKey)
+                end)
+                if Ok and typeof(Saved) == "string" and Saved ~= "" then
+                    Box.Text = Saved
+                    task.defer(KeyBox.Submit)
+                end
+            end
+
+            KeyBox.Box = Box
+            KeyBox.Card = Card
+            return KeyBox
         end
 
         function Tab:Destroy()

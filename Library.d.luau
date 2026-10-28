@@ -848,6 +848,30 @@ export type Tab = {
     SetTooltip: (self: Tab, Text: string?) -> (),
 }
 
+export type KeyBoxInfo = {
+    Title: string?,
+    Subtitle: string?,
+    Text: string?,
+    Placeholder: string?,
+    ButtonText: string?,
+    Footer: string?,
+    ExpectedKey: (string | { string })?,
+    Validate: ((Key: string) -> (boolean, string?))?,
+    Callback: ((Success: boolean, Key: string) -> ())?,
+    GetKey: (string | () -> ())?,
+    GetKeyText: string?,
+    Premium: (string | () -> ())?,
+    PremiumText: string?,
+    SaveKey: string?,
+}
+
+export type KeyBox = {
+    Box: TextBox,
+    Card: Frame,
+    SetStatus: (self: KeyBox, Text: string?, Success: boolean?) -> (),
+    Submit: (self: KeyBox) -> (),
+}
+
 export type KeyTab = BaseGroupbox & {
     Elements: { [any]: any },
     IsKeyTab: true,
@@ -856,7 +880,9 @@ export type KeyTab = BaseGroupbox & {
     Tooltip: string?,
     TooltipTable: Tooltip?,
 
-    AddKeyBox: (self: KeyTab, ExpectedKey: string?, Callback: (Success: boolean, Key: string) -> ()) -> (),
+    AddKeyBox: ((self: KeyTab, Info: KeyBoxInfo) -> KeyBox)
+        & ((self: KeyTab, ExpectedKey: string | { string }, Callback: (Success: boolean, Key: string) -> ()) -> KeyBox)
+        & ((self: KeyTab, Callback: (Key: string) -> ()) -> KeyBox),
     Resize: (self: KeyTab) -> (),
     Hover: (self: KeyTab, Hovering: boolean) -> (),
     Show: (self: KeyTab) -> (),

@@ -406,22 +406,24 @@ Header:AddInput("TitleText", {
 --// Key System
 --============================================================================--
 
-Tabs.Key:AddLabel({
-	Text = "Key: Alexandria",
-	DoesWrap = true,
-	Size = 16,
+Tabs.Key:AddKeyBox({
+	Title = "Alexandria",
+	Subtitle = "Feature tour",
+	Text = "Enter your key to continue. (Hint: Alexandria)",
+	Placeholder = "your key...",
+	ExpectedKey = "Alexandria", -- or Validate = function(Key) return Ok, Message end
+	GetKey = "https://example.com/getkey", -- string copies the link, function runs
+	Premium = function()
+		Library:Notify({ Title = "Premium", Description = "Not for sale.", Time = 3 })
+	end,
+	Footer = "your key is saved on this device after it checks out.",
+	SaveKey = "Alexandria/key.txt",
+	Callback = function(Success, Key)
+		if Success then
+			Library:Notify({ Title = "Key accepted", Description = "Welcome in.", Time = 3 })
+		end
+	end,
 })
-
-Tabs.Key:AddKeyBox(function(ReceivedKey)
-	-- AddKeyBox only gives you the typed key; checking it is up to you
-	local Success = ReceivedKey == "Alexandria"
-
-	Library:Notify({
-		Title = Success and "Key accepted" or "Wrong key",
-		Description = Success and "Welcome in." or "Try again.",
-		Time = 3,
-	})
-end)
 
 --============================================================================--
 --// Settings: menu, theming, configs
