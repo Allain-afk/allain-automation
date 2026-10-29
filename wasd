@@ -1,5 +1,9 @@
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
+local VirtualUser = game:GetService("VirtualUser")
+local VirtualInputManager = pcall(function()
+	return game:GetService("VirtualInputManager")
+end) and game:GetService("VirtualInputManager") or nil
 
 local player = Players.LocalPlayer
 if not player then
@@ -16,6 +20,7 @@ local Options = Library.Options
 
 --// State Variables \\--
 local isRunning = false
+local antiAfkEnabled = true
 local walkDistance = 4
 local pauseDuration = 4
 
@@ -23,10 +28,10 @@ local pauseDuration = 4
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v1.0",
+	FooterRight = "v1.1",
 	Username = true,
 	Badge = "Idle",
-	Size = UDim2.fromOffset(520, 360),
+	Size = UDim2.fromOffset(520, 380),
 	Center = true,
 	AutoShow = true,
 })
@@ -52,6 +57,12 @@ ControlsBox:AddCheckbox("AutoWASD", {
 	Mode = "Toggle",
 	SyncToggleState = true,
 	Text = "Auto-Mover",
+})
+
+ControlsBox:AddCheckbox("AntiAFK", {
+	Text = "Anti-AFK (20m Bypass)",
+	Default = true,
+	Tooltip = "Prevents Roblox Error Code 278 (20-minute idle disconnect)",
 })
 
 ControlsBox:AddSlider("WalkDistance", {
@@ -181,13 +192,60 @@ local function highlightKey(activeKey)
 	end
 end
 
+--// Anti-AFK (Prevents Roblox 20-Minute Idle Kick / Error 278) \\--
+local function pulseAntiAfk()
+	pcall(function()
+		VirtualUser:CaptureController()
+		VirtualUser:ClickButton2(Vector2.new())
+	end)
+end
+
+local function setInternalIdledConnections(enabled)
+	local getconns = getconnections or get_signal_cons
+	if getconns then
+		pcall(function()
+			for _, conn in pairs(getconns(player.Idled)) do
+				if enabled then
+					if conn.Enable then
+						conn:Enable()
+					end
+				else
+					if conn.Disable then
+						conn:Disable()
+					elseif conn.Disconnect then
+						conn:Disconnect()
+					end
+				end
+			end
+		end)
+	end
+end
+
+-- Disable Roblox's internal idle kick connection immediately if supported
+setInternalIdledConnections(false)
+
+-- Fallback hook on LocalPlayer.Idled
+local idledConnection = player.Idled:Connect(function()
+	if antiAfkEnabled and not Library.Unloaded then
+		pulseAntiAfk()
+	end
+end)
+
 --// WASD Movement Automation \\--
 local directions = {
-	{ key = "W", label = "Forward (W)", getOffset = function(cf, dist) return cf.LookVector * dist end },
-	{ key = "A", label = "Left (A)", getOffset = function(cf, dist) return -cf.RightVector * dist end },
-	{ key = "S", label = "Backward (S)", getOffset = function(cf, dist) return -cf.LookVector * dist end },
-	{ key = "D", label = "Right (D)", getOffset = function(cf, dist) return cf.RightVector * dist end },
+	{ key = "W", keyCode = Enum.KeyCode.W, label = "Forward (W)", getOffset = function(cf, dist) return cf.LookVector * dist end },
+	{ key = "A", keyCode = Enum.KeyCode.A, label = "Left (A)", getOffset = function(cf, dist) return -cf.RightVector * dist end },
+	{ key = "S", keyCode = Enum.KeyCode.S, label = "Backward (S)", getOffset = function(cf, dist) return -cf.LookVector * dist end },
+	{ key = "D", keyCode = Enum.KeyCode.D, label = "Right (D)", getOffset = function(cf, dist) return cf.RightVector * dist end },
 }
+
+local function sendKeyState(keyCode, isDown)
+	if VirtualInputManager then
+		pcall(function()
+			VirtualInputManager:SendKeyEvent(isDown, keyCode, false, game)
+		end)
+	end
+end
 
 local function moveStep(dirData)
 	local character = player.Character or player.CharacterAdded:Wait()
@@ -196,6 +254,12 @@ local function moveStep(dirData)
 	if not humanoid or not rootPart then
 		return
 	end
+
+	-- Reset Roblox's internal input timer alongside movement
+	if antiAfkEnabled then
+		pulseAntiAfk()
+	end
+	sendKeyState(dirData.keyCode, true)
 
 	local targetPosition = rootPart.Position + dirData.getOffset(rootPart.CFrame, walkDistance)
 	humanoid:MoveTo(targetPosition)
@@ -210,6 +274,8 @@ local function moveStep(dirData)
 	while isRunning and not Library.Unloaded and not reached and (os.clock() - startWait) < 1.2 do
 		task.wait(0.05)
 	end
+
+	sendKeyState(dirData.keyCode, false)
 
 	if conn then
 		conn:Disconnect()
@@ -255,6 +321,11 @@ Toggles.AutoWASD:OnChanged(function(Value)
 	end
 end)
 
+Toggles.AntiAFK:OnChanged(function(Value)
+	antiAfkEnabled = Value
+	setInternalIdledConnections(not Value)
+end)
+
 Options.WalkDistance:OnChanged(function(Value)
 	walkDistance = Value
 end)
@@ -265,5 +336,13 @@ end)
 
 Library:OnUnload(function()
 	isRunning = false
+	antiAfkEnabled = false
+	if idledConnection then
+		idledConnection:Disconnect()
+	end
+	setInternalIdledConnections(true)
+	for _, dir in ipairs(directions) do
+		sendKeyState(dir.keyCode, false)
+	end
 	highlightKey(nil)
 end)
