@@ -259,9 +259,17 @@ local function moveStep(dirData)
 	if antiAfkEnabled then
 		pulseAntiAfk()
 	end
-	sendKeyState(dirData.keyCode, true)
 
-	local targetPosition = rootPart.Position + dirData.getOffset(rootPart.CFrame, walkDistance)
+	local startPos = rootPart.Position
+	local targetPosition = startPos + dirData.getOffset(rootPart.CFrame, walkDistance)
+	local speed = math.max(humanoid.WalkSpeed, 1)
+	local maxStepTime = math.clamp((walkDistance / speed) + 0.15, 0.15, 2.0)
+
+	-- Brief key tap registers hardware input for Anti-AFK without cancelling MoveTo
+	sendKeyState(dirData.keyCode, true)
+	task.wait(0.03)
+	sendKeyState(dirData.keyCode, false)
+
 	humanoid:MoveTo(targetPosition)
 
 	local reached = false
@@ -271,11 +279,12 @@ local function moveStep(dirData)
 	end)
 
 	local startWait = os.clock()
-	while isRunning and not Library.Unloaded and not reached and (os.clock() - startWait) < 1.2 do
-		task.wait(0.05)
+	while isRunning and not Library.Unloaded and not reached and (os.clock() - startWait) < maxStepTime do
+		if (rootPart.Position - startPos).Magnitude >= walkDistance then
+			break
+		end
+		task.wait(0.03)
 	end
-
-	sendKeyState(dirData.keyCode, false)
 
 	if conn then
 		conn:Disconnect()
