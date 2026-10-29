@@ -1,0 +1,269 @@
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+if not player then
+	warn("[AutoWASD] This script must run as a LocalScript on the client, not a server Script!")
+	return
+end
+
+--// Load Alexandria Library \\--
+local repo = "https://raw.githubusercontent.com/Allain-afk/allain-automation/main/"
+local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+
+local Toggles = Library.Toggles
+local Options = Library.Options
+
+--// State Variables \\--
+local isRunning = false
+local walkDistance = 4
+local pauseDuration = 4
+
+--// Window & Tabs \\--
+local Window = Library:CreateWindow({
+	Title = "WASD Auto-Mover",
+	Footer = "alexandria · auto-mover",
+	FooterRight = "v1.0",
+	Username = true,
+	Badge = "Idle",
+	Size = UDim2.fromOffset(520, 360),
+	Center = true,
+	AutoShow = true,
+})
+
+local Tabs = {
+	Mover = Window:AddTab("Auto-Mover", "footprints"),
+}
+
+--// Left Groupbox: Controls & Configuration \\--
+local ControlsBox = Tabs.Mover:AddGroupbox({
+	Side = "Left",
+	Name = "Controls",
+	IconName = "gamepad-2",
+	Description = "Toggle WASD movement and tune cycle settings.",
+})
+
+ControlsBox:AddCheckbox("AutoWASD", {
+	Text = "Enable Auto-Mover",
+	Default = false,
+	Tooltip = "Walks Forward (W), Left (A), Back (S), and Right (D) in a loop",
+}):AddKeyPicker("AutoWASDKey", {
+	Default = "Q",
+	Mode = "Toggle",
+	SyncToggleState = true,
+	Text = "Auto-Mover",
+})
+
+ControlsBox:AddSlider("WalkDistance", {
+	Text = "Walk Distance",
+	Default = walkDistance,
+	Min = 1,
+	Max = 25,
+	Rounding = 0,
+	Suffix = " studs",
+})
+
+ControlsBox:AddSlider("PauseDuration", {
+	Text = "Pause Between Cycles",
+	Default = pauseDuration,
+	Min = 0,
+	Max = 30,
+	Rounding = 1,
+	Suffix = "s",
+})
+
+ControlsBox:AddDivider()
+
+ControlsBox:AddLabel("Menu Keybind"):AddKeyPicker("MenuKeybind", {
+	Default = "RightShift",
+	NoUI = true,
+	Text = "Menu keybind",
+})
+Library.ToggleKeybind = Options.MenuKeybind
+
+ControlsBox:AddButton({
+	Text = "Unload Script",
+	Risky = true,
+	Func = function()
+		Library:Unload()
+	end,
+})
+
+--// Right Groupbox: Live WASD Key Visualizer \\--
+local VisualizerBox = Tabs.Mover:AddGroupbox({
+	Side = "Right",
+	Name = "Key Visualizer",
+	IconName = "keyboard",
+	Description = "Highlights the active movement direction.",
+})
+
+local StatusLabel = VisualizerBox:AddLabel("StatusLabel", {
+	Text = "Status: Idle",
+	DoesWrap = false,
+})
+
+VisualizerBox:AddDivider()
+
+-- Custom WASD Keycap Widget embedded via AddUIPassthrough
+local keysContainer = Instance.new("Frame")
+keysContainer.Name = "WASDContainer"
+keysContainer.Size = UDim2.new(1, 0, 1, 0)
+keysContainer.BackgroundTransparency = 1
+
+local keysFrame = Instance.new("Frame")
+keysFrame.Name = "KeysGrid"
+keysFrame.Size = UDim2.fromOffset(116, 76)
+keysFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+keysFrame.Position = UDim2.fromScale(0.5, 0.5)
+keysFrame.BackgroundTransparency = 1
+keysFrame.Parent = keysContainer
+
+local keyBoxes = {}
+local keyLayout = {
+	W = UDim2.fromOffset(40, 0),
+	A = UDim2.fromOffset(0, 40),
+	S = UDim2.fromOffset(40, 40),
+	D = UDim2.fromOffset(80, 40),
+}
+
+local idleBgColor = Library.Scheme.MainColor or Color3.fromRGB(20, 20, 22)
+local idleStrokeColor = Library.Scheme.OutlineColor or Color3.fromRGB(36, 36, 39)
+local idleTextColor = Color3.fromRGB(160, 160, 170)
+local activeBgColor = Library.Scheme.AccentColor or Color3.fromRGB(232, 232, 236)
+local activeTextColor = Library.Scheme.BackgroundColor or Color3.fromRGB(14, 14, 15)
+
+for keyName, pos in pairs(keyLayout) do
+	local box = Instance.new("TextLabel")
+	box.Name = "Key_" .. keyName
+	box.Size = UDim2.fromOffset(36, 36)
+	box.Position = pos
+	box.BackgroundColor3 = idleBgColor
+	box.BorderSizePixel = 0
+	box.Text = keyName
+	box.TextColor3 = idleTextColor
+	box.FontFace = Library.Scheme.Font or Font.fromEnum(Enum.Font.GothamBold)
+	box.TextSize = 14
+	box.Parent = keysFrame
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, Library.CornerRadius or 6)
+	corner.Parent = box
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = idleStrokeColor
+	stroke.Thickness = 1
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = box
+
+	keyBoxes[keyName] = {
+		Label = box,
+		Stroke = stroke,
+	}
+end
+
+VisualizerBox:AddUIPassthrough("WASDVisualizer", {
+	Instance = keysContainer,
+	Height = 90,
+})
+
+local tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+
+local function highlightKey(activeKey)
+	for k, data in pairs(keyBoxes) do
+		local isCurrent = (k == activeKey)
+		TweenService:Create(data.Label, tweenInfo, {
+			BackgroundColor3 = isCurrent and activeBgColor or idleBgColor,
+			TextColor3 = isCurrent and activeTextColor or idleTextColor,
+		}):Play()
+		TweenService:Create(data.Stroke, tweenInfo, {
+			Color = isCurrent and activeBgColor or idleStrokeColor,
+		}):Play()
+	end
+end
+
+--// WASD Movement Automation \\--
+local directions = {
+	{ key = "W", label = "Forward (W)", getOffset = function(cf, dist) return cf.LookVector * dist end },
+	{ key = "A", label = "Left (A)", getOffset = function(cf, dist) return -cf.RightVector * dist end },
+	{ key = "S", label = "Backward (S)", getOffset = function(cf, dist) return -cf.LookVector * dist end },
+	{ key = "D", label = "Right (D)", getOffset = function(cf, dist) return cf.RightVector * dist end },
+}
+
+local function moveStep(dirData)
+	local character = player.Character or player.CharacterAdded:Wait()
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not rootPart then
+		return
+	end
+
+	local targetPosition = rootPart.Position + dirData.getOffset(rootPart.CFrame, walkDistance)
+	humanoid:MoveTo(targetPosition)
+
+	local reached = false
+	local conn
+	conn = humanoid.MoveToFinished:Connect(function()
+		reached = true
+	end)
+
+	local startWait = os.clock()
+	while isRunning and not Library.Unloaded and not reached and (os.clock() - startWait) < 1.2 do
+		task.wait(0.05)
+	end
+
+	if conn then
+		conn:Disconnect()
+	end
+end
+
+--// Main Loop \\--
+task.spawn(function()
+	while not Library.Unloaded do
+		if isRunning then
+			for _, dir in ipairs(directions) do
+				if not isRunning or Library.Unloaded then
+					break
+				end
+				StatusLabel:SetText("Status: Moving " .. dir.label)
+				highlightKey(dir.key)
+				moveStep(dir)
+				task.wait(0.15)
+			end
+			highlightKey(nil)
+
+			if isRunning and not Library.Unloaded and pauseDuration > 0 then
+				StatusLabel:SetText(string.format("Status: Waiting (%.1fs)", pauseDuration))
+				local waitStart = os.clock()
+				while isRunning and not Library.Unloaded and (os.clock() - waitStart) < pauseDuration do
+					task.wait(0.1)
+				end
+			end
+		else
+			highlightKey(nil)
+			task.wait(0.2)
+		end
+	end
+end)
+
+--// UI Event Bindings \\--
+Toggles.AutoWASD:OnChanged(function(Value)
+	isRunning = Value
+	Window:SetBadge(Value and "Running" or "Idle")
+	StatusLabel:SetText(Value and "Status: Starting..." or "Status: Idle")
+	if not Value then
+		highlightKey(nil)
+	end
+end)
+
+Options.WalkDistance:OnChanged(function(Value)
+	walkDistance = Value
+end)
+
+Options.PauseDuration:OnChanged(function(Value)
+	pauseDuration = Value
+end)
+
+Library:OnUnload(function()
+	isRunning = false
+	highlightKey(nil)
+end)

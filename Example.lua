@@ -1,7 +1,7 @@
 -- Alexandria example: a tour of every element, the header, theming and configs.
 -- Point `repo` at your own fork if you host the files somewhere else.
 
-local repo = "https://raw.githubusercontent.com/joustingmatch/Alexandria/main/"
+local repo = "https://raw.githubusercontent.com/Allain-afk/allain-automation/main/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
 local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
