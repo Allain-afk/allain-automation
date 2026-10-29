@@ -22,7 +22,7 @@ local pauseDuration = 4
 --// Window & Tabs \\--
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
-	Footer = "alexandria · auto-mover",
+	Footer = "Allain-afk · auto-mover",
 	FooterRight = "v1.0",
 	Username = true,
 	Badge = "Idle",
