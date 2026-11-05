@@ -152,12 +152,10 @@ local guardEspEnabled = false
 local guardWarnEnabled = true
 local guardWarnDistance = 45
 
-local petRadarEnabled = false
-local rarePetAlertEnabled = false
+local rarePetAlertEnabled = true
 local rarePetSoundEnabled = true
-local rarePetWebhookEnabled = false
+local rarePetWebhookEnabled = true
 local rarePetMinCashM = 0
-local rarePetMaxDistance = 500
 local defaultRareAlertTiers = {
 	"Divine",
 	"Cosmic",
@@ -186,7 +184,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v2.7",
+	FooterRight = "v2.6",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
@@ -528,52 +526,8 @@ local TopPetsRadarBox = Tabs.Visuals:AddGroupbox({
 	Description = "Highest Cash/s pets currently on the ground across the server.",
 })
 
-TopPetsRadarBox:AddCheckbox("PetRadarEnabled", {
-	Text = "Enable In-Game Pet Radar",
-	Default = false,
-	Tooltip = "Updates the Top 3 highest Cash/s ground pets live in this panel and dashboard",
-})
-
-TopPetsRadarBox:AddCheckbox("PetRadarWebhookQuick", {
-	Text = "Enable Pet Radar Webhook",
-	Default = false,
-	Tooltip = "Sends Discord webhook embeds when rare pets spawn (synced with AFK & Alerts tab)",
-})
-
-TopPetsRadarBox:AddButton("Enable Radar + Webhook", function()
-	if Toggles.PetRadarEnabled then
-		Toggles.PetRadarEnabled:SetValue(true)
-	end
-	if Toggles.RarePetAlertEnabled then
-		Toggles.RarePetAlertEnabled:SetValue(true)
-	end
-	if Toggles.RarePetWebhookEnabled then
-		Toggles.RarePetWebhookEnabled:SetValue(true)
-	end
-	if Toggles.PetRadarWebhookQuick then
-		Toggles.PetRadarWebhookQuick:SetValue(true)
-	end
-	Library:Notify("Pet Radar (In-Game + Webhook) Enabled!", 2)
-end):AddButton("Disable Both", function()
-	if Toggles.PetRadarEnabled then
-		Toggles.PetRadarEnabled:SetValue(false)
-	end
-	if Toggles.RarePetAlertEnabled then
-		Toggles.RarePetAlertEnabled:SetValue(false)
-	end
-	if Toggles.RarePetWebhookEnabled then
-		Toggles.RarePetWebhookEnabled:SetValue(false)
-	end
-	if Toggles.PetRadarWebhookQuick then
-		Toggles.PetRadarWebhookQuick:SetValue(false)
-	end
-	Library:Notify("Pet Radar & Rare Pet Webhook Disabled!", 2)
-end)
-
-TopPetsRadarBox:AddDivider()
-
 local TopPet1Label = TopPetsRadarBox:AddLabel("TopPet1Label", {
-	Text = "#1: Radar Disabled",
+	Text = "#1: Scanning workspace...",
 	DoesWrap = true,
 })
 
@@ -748,9 +702,9 @@ local RareAlertBox = Tabs.Utilities:AddGroupbox({
 })
 
 RareAlertBox:AddCheckbox("RarePetAlertEnabled", {
-	Text = "Enable In-Game Rare Pet Alert",
-	Default = false,
-	Tooltip = "Shows an in-game popup when a matching pet newly spawns in workspace.AnimalPickups",
+	Text = "Enable Rare Pet Spawn Alert",
+	Default = true,
+	Tooltip = "Watches workspace.AnimalPickups and alerts you as soon as a matching pet spawns",
 })
 
 RareAlertBox:AddCheckbox("RarePetSoundEnabled", {
@@ -760,40 +714,10 @@ RareAlertBox:AddCheckbox("RarePetSoundEnabled", {
 })
 
 RareAlertBox:AddCheckbox("RarePetWebhookEnabled", {
-	Text = "Enable Rare Pet Webhook",
-	Default = false,
+	Text = "Send Instant Discord Ping",
+	Default = true,
 	Tooltip = "Posts a rich Discord embed with Pet Name, Rarity, Weight, Cash/s, and Timer",
 })
-
-RareAlertBox:AddButton("Enable Both (In-Game + Webhook)", function()
-	if Toggles.PetRadarEnabled then
-		Toggles.PetRadarEnabled:SetValue(true)
-	end
-	if Toggles.RarePetAlertEnabled then
-		Toggles.RarePetAlertEnabled:SetValue(true)
-	end
-	if Toggles.RarePetWebhookEnabled then
-		Toggles.RarePetWebhookEnabled:SetValue(true)
-	end
-	if Toggles.PetRadarWebhookQuick then
-		Toggles.PetRadarWebhookQuick:SetValue(true)
-	end
-	Library:Notify("Rare Pet In-Game Alert + Webhook Enabled!", 2)
-end):AddButton("Disable Both", function()
-	if Toggles.PetRadarEnabled then
-		Toggles.PetRadarEnabled:SetValue(false)
-	end
-	if Toggles.RarePetAlertEnabled then
-		Toggles.RarePetAlertEnabled:SetValue(false)
-	end
-	if Toggles.RarePetWebhookEnabled then
-		Toggles.RarePetWebhookEnabled:SetValue(false)
-	end
-	if Toggles.PetRadarWebhookQuick then
-		Toggles.PetRadarWebhookQuick:SetValue(false)
-	end
-	Library:Notify("Rare Pet In-Game Alert + Webhook Disabled!", 2)
-end)
 
 RareAlertBox:AddDropdown("RarePetAlertRarities", {
 	Text = "Alert Rarity Tiers",
@@ -813,16 +737,6 @@ RareAlertBox:AddSlider("RarePetMinCashM", {
 	Rounding = 0,
 	Suffix = "M/s",
 	Tooltip = "Only alert if the pet generates at least this many Million/s (0M/s = any Cash/s)",
-})
-
-RareAlertBox:AddSlider("RarePetMaxDistance", {
-	Text = "Max Alert Distance",
-	Default = rarePetMaxDistance,
-	Min = 50,
-	Max = 5000,
-	Rounding = 0,
-	Suffix = " studs",
-	Tooltip = "Only alert for rare pets spawning within this distance (prevents far-zone spam)",
 })
 
 local WebhookBox = Tabs.Utilities:AddGroupbox({
@@ -2483,38 +2397,13 @@ local function updateAllGuardEsp()
 end
 
 --// 3. Live Top-Pets Radar & Rare Pet Spawn Alert \\--
-local function seedExistingGroundPetsAsSeen()
+local function scanGroundPetsAndAlerts()
 	local pickupsFolder = workspace:FindFirstChild("AnimalPickups")
 	if not pickupsFolder then
-		return
-	end
-	for _, petModel in ipairs(pickupsFolder:GetChildren()) do
-		local hatchId = petModel:GetAttribute("HatchId")
-		local petKey = hatchId and ("id_" .. tostring(hatchId)) or petModel
-		alertedPetKeys[petKey] = true
-	end
-end
-
-local function scanGroundPetsAndAlerts()
-	if not petRadarEnabled then
-		TopPet1Label:SetText("#1: Radar Disabled")
+		TopPet1Label:SetText("#1: None on ground")
 		TopPet2Label:SetText("#2: --")
 		TopPet3Label:SetText("#3: --")
-		BestGroundPetLabel:SetText("Best Ground Pet: Radar Off")
-	end
-
-	if not petRadarEnabled and not rarePetAlertEnabled and not rarePetWebhookEnabled then
-		return
-	end
-
-	local pickupsFolder = workspace:FindFirstChild("AnimalPickups")
-	if not pickupsFolder then
-		if petRadarEnabled then
-			TopPet1Label:SetText("#1: None on ground")
-			TopPet2Label:SetText("#2: --")
-			TopPet3Label:SetText("#3: --")
-			BestGroundPetLabel:SetText("Best Ground Pet: None")
-		end
+		BestGroundPetLabel:SetText("Best Ground Pet: None")
 		return
 	end
 
@@ -2557,48 +2446,43 @@ local function scanGroundPetsAndAlerts()
 					wStr = wStr .. " [" .. weightBracket .. "]"
 				end
 
-				if petRadarEnabled then
-					table.insert(groundPets, {
-						model = petModel,
-						name = cleanName,
-						mutation = mutationText,
-						rarity = finalRarity,
-						rarityRank = rank,
-						cpsText = cpsText or "$0/s",
-						cpsNum = cpsNum,
-						weightStr = wStr,
-						timerText = timerText,
-						dist = math.floor(dist + 0.5),
-						hatchId = hatchId,
-					})
-				end
+				table.insert(groundPets, {
+					model = petModel,
+					name = cleanName,
+					mutation = mutationText,
+					rarity = finalRarity,
+					rarityRank = rank,
+					cpsText = cpsText or "$0/s",
+					cpsNum = cpsNum,
+					weightStr = wStr,
+					timerText = timerText,
+					dist = math.floor(dist + 0.5),
+					hatchId = hatchId,
+				})
 
-				-- Check Rare Pet Spawn Alert (wait up to 0.35s if overhead Cash/s text is still loading)
+				-- Check Rare Pet Spawn Alert (wait up to 0.3s if overhead Cash/s text is still loading)
 				local petKey = hatchId and ("id_" .. tostring(hatchId)) or petModel
 				local overheadReady = (cpsText ~= nil and cpsText ~= "") or ((now - petFirstSeenAt[petModel]) >= 0.35)
 				if overheadReady and not alertedPetKeys[petKey] then
 					alertedPetKeys[petKey] = true
 
-					if (rarePetAlertEnabled or rarePetWebhookEnabled) and dist <= rarePetMaxDistance and isRaritySelectedInTable(finalRarity, rarePetAlertSelected) then
+					if rarePetAlertEnabled and isRaritySelectedInTable(finalRarity, rarePetAlertSelected) then
 						local minCashRequired = (rarePetMinCashM or 0) * 1e6
 						if minCashRequired <= 0 or cpsNum >= minCashRequired then
 							local mutTag = (mutationText and mutationText ~= "") and (" [" .. mutationText .. "]") or ""
+							local alertSummary = string.format(
+								"🌟 Rare Pet: %s%s (%s) — %s%s [%dm]",
+								cleanName,
+								mutTag,
+								finalRarity,
+								cpsText or "N/A",
+								wStr and (" · " .. wStr) or "",
+								math.floor(dist + 0.5)
+							)
+							Library:Notify(alertSummary, 6)
 
-							if rarePetAlertEnabled then
-								local alertSummary = string.format(
-									"🌟 Rare Pet: %s%s (%s) — %s%s [%dm]",
-									cleanName,
-									mutTag,
-									finalRarity,
-									cpsText or "N/A",
-									wStr and (" · " .. wStr) or "",
-									math.floor(dist + 0.5)
-								)
-								Library:Notify(alertSummary, 6)
-
-								if rarePetSoundEnabled then
-									playClientAlertSound("rbxassetid://4590657391", 1.8, 1)
-								end
+							if rarePetSoundEnabled then
+								playClientAlertSound("rbxassetid://4590657391", 1.8, 1)
 							end
 
 							if rarePetWebhookEnabled then
@@ -2626,38 +2510,36 @@ local function scanGroundPetsAndAlerts()
 		end
 	end
 
-	if petRadarEnabled then
-		table.sort(groundPets, function(a, b)
-			if a.cpsNum ~= b.cpsNum then
-				return a.cpsNum > b.cpsNum
-			end
-			if a.rarityRank ~= b.rarityRank then
-				return a.rarityRank > b.rarityRank
-			end
-			return a.dist < b.dist
-		end)
-
-		local function formatRadarEntry(idx, p)
-			if not p then
-				return string.format("#%d: --", idx)
-			end
-			local mut = (p.mutation and p.mutation ~= "") and (" [" .. p.mutation .. "]") or ""
-			local tmr = (p.timerText and p.timerText ~= "") and (" · ⏱" .. p.timerText) or ""
-			return string.format("#%d: %s%s (%s) — %s%s [%dm]", idx, p.name, mut, p.rarity, p.cpsText, tmr, p.dist)
+	table.sort(groundPets, function(a, b)
+		if a.cpsNum ~= b.cpsNum then
+			return a.cpsNum > b.cpsNum
 		end
-
-		if #groundPets == 0 then
-			TopPet1Label:SetText("#1: No hatched pets on ground")
-			TopPet2Label:SetText("#2: --")
-			TopPet3Label:SetText("#3: --")
-			BestGroundPetLabel:SetText("Best Ground Pet: None")
-		else
-			TopPet1Label:SetText(formatRadarEntry(1, groundPets[1]))
-			TopPet2Label:SetText(formatRadarEntry(2, groundPets[2]))
-			TopPet3Label:SetText(formatRadarEntry(3, groundPets[3]))
-			local best = groundPets[1]
-			BestGroundPetLabel:SetText(string.format("Best Pet: %s (%s) %s [%dm]", best.name, best.rarity, best.cpsText, best.dist))
+		if a.rarityRank ~= b.rarityRank then
+			return a.rarityRank > b.rarityRank
 		end
+		return a.dist < b.dist
+	end)
+
+	local function formatRadarEntry(idx, p)
+		if not p then
+			return string.format("#%d: --", idx)
+		end
+		local mut = (p.mutation and p.mutation ~= "") and (" [" .. p.mutation .. "]") or ""
+		local tmr = (p.timerText and p.timerText ~= "") and (" · ⏱" .. p.timerText) or ""
+		return string.format("#%d: %s%s (%s) — %s%s [%dm]", idx, p.name, mut, p.rarity, p.cpsText, tmr, p.dist)
+	end
+
+	if #groundPets == 0 then
+		TopPet1Label:SetText("#1: No hatched pets on ground")
+		TopPet2Label:SetText("#2: --")
+		TopPet3Label:SetText("#3: --")
+		BestGroundPetLabel:SetText("Best Ground Pet: None")
+	else
+		TopPet1Label:SetText(formatRadarEntry(1, groundPets[1]))
+		TopPet2Label:SetText(formatRadarEntry(2, groundPets[2]))
+		TopPet3Label:SetText(formatRadarEntry(3, groundPets[3]))
+		local best = groundPets[1]
+		BestGroundPetLabel:SetText(string.format("Best Pet: %s (%s) %s [%dm]", best.name, best.rarity, best.cpsText, best.dist))
 	end
 end
 
@@ -3004,35 +2886,8 @@ Options.GuardWarnDistance:OnChanged(function(Value)
 	autoSaveActiveConfig()
 end)
 
-local isSyncingWebhookToggle = false
-
-Toggles.PetRadarEnabled:OnChanged(function(Value)
-	petRadarEnabled = Value
-	pcall(scanGroundPetsAndAlerts)
-	autoSaveActiveConfig()
-end)
-
-Toggles.PetRadarWebhookQuick:OnChanged(function(Value)
-	if isSyncingWebhookToggle then
-		return
-	end
-	isSyncingWebhookToggle = true
-	rarePetWebhookEnabled = Value
-	if Value then
-		pcall(seedExistingGroundPetsAsSeen)
-	end
-	if Toggles.RarePetWebhookEnabled and Toggles.RarePetWebhookEnabled.Value ~= Value then
-		Toggles.RarePetWebhookEnabled:SetValue(Value)
-	end
-	isSyncingWebhookToggle = false
-	autoSaveActiveConfig()
-end)
-
 Toggles.RarePetAlertEnabled:OnChanged(function(Value)
 	rarePetAlertEnabled = Value
-	if Value then
-		pcall(seedExistingGroundPetsAsSeen)
-	end
 	autoSaveActiveConfig()
 end)
 
@@ -3043,14 +2898,6 @@ end)
 
 Toggles.RarePetWebhookEnabled:OnChanged(function(Value)
 	rarePetWebhookEnabled = Value
-	if Value then
-		pcall(seedExistingGroundPetsAsSeen)
-	end
-	if not isSyncingWebhookToggle and Toggles.PetRadarWebhookQuick and Toggles.PetRadarWebhookQuick.Value ~= Value then
-		isSyncingWebhookToggle = true
-		Toggles.PetRadarWebhookQuick:SetValue(Value)
-		isSyncingWebhookToggle = false
-	end
 	autoSaveActiveConfig()
 end)
 
@@ -3066,19 +2913,10 @@ Options.RarePetMinCashM:OnChanged(function(Value)
 	autoSaveActiveConfig()
 end)
 
-Options.RarePetMaxDistance:OnChanged(function(Value)
-	rarePetMaxDistance = Value
-	autoSaveActiveConfig()
-end)
-
---// Seed existing pets on startup so we only alert on newly spawned pets \\--
-pcall(seedExistingGroundPetsAsSeen)
-
 --// Load Autoload Config on Startup \\--
 SaveManager:LoadAutoloadConfig()
 task.delay(0.6, function()
 	isInitializingConfig = false
-	pcall(seedExistingGroundPetsAsSeen)
 	pcall(collectProgressSnapshot, false)
 	pcall(scanGroundPetsAndAlerts)
 	if shared.__AllainReconnected and webhookNotifyEvents then
