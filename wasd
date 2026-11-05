@@ -97,7 +97,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v2.1",
+	FooterRight = "v2.2",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
@@ -835,173 +835,125 @@ local function sendWorkspacePetSnapshot()
 	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
 	local myPos = myRoot and myRoot.Position
 
-	local playerChars = {}
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr.Character then
-			playerChars[plr.Character] = true
+	local lines = {}
+
+	local function inspectFolder(folderName, maxItems)
+		local folder = workspace:FindFirstChild(folderName)
+		if not folder then
+			table.insert(lines, string.format("-- %s: NOT FOUND --", folderName))
+			return
 		end
-	end
+		local children = folder:GetChildren()
+		table.insert(lines, string.format("=== %s (%d children) ===", folderName, #children))
 
-	local function isInsidePlayerChar(inst)
-		local cur = inst
-		while cur and cur ~= workspace do
-			if playerChars[cur] then
-				return true
-			end
-			cur = cur.Parent
-		end
-		return false
-	end
+		-- Sort by distance to player so the closest hatched pet is first!
+		table.sort(children, function(a, b)
+			local posA, posB
+			pcall(function()
+				posA = a:IsA("Model") and a:GetPivot().Position or (a:IsA("BasePart") and a.Position or nil)
+			end)
+			pcall(function()
+				posB = b:IsA("Model") and b:GetPivot().Position or (b:IsA("BasePart") and b.Position or nil)
+			end)
+			local dA = (myPos and posA) and (posA - myPos).Magnitude or 999999
+			local dB = (myPos and posB) and (posB - myPos).Magnitude or 999999
+			return dA < dB
+		end)
 
-	local nearbyLines = {}
-	local globalAttrLines = {}
-	local topFolders = {}
+		for i = 1, math.min(#children, maxItems) do
+			local item = children[i]
+			local pos = nil
+			pcall(function()
+				pos = item:IsA("Model") and item:GetPivot().Position or (item:IsA("BasePart") and item.Position or nil)
+			end)
+			local dist = (myPos and pos) and math.floor((pos - myPos).Magnitude) or -1
+			table.insert(lines, string.format("\n[%d] %s (%s) [Dist: %dm]", i, item.Name, item.ClassName, dist))
 
-	for _, child in ipairs(workspace:GetChildren()) do
-		if not playerChars[child] and not child:IsA("Terrain") and not child:IsA("Camera") then
-			table.insert(topFolders, string.format("%s (%s, %d children)", child.Name, child.ClassName, #child:GetChildren()))
-		end
-	end
-
-	local seenModels = {}
-
-	for _, desc in ipairs(workspace:GetDescendants()) do
-		if not isInsidePlayerChar(desc) then
-			-- Check any instance with Attributes
-			local attrs = desc:GetAttributes()
+			-- Item Attributes
+			local attrs = item:GetAttributes()
 			if next(attrs) ~= nil then
 				local kv = {}
 				for k, v in pairs(attrs) do
 					table.insert(kv, string.format("%s=%s", tostring(k), tostring(v)))
 				end
 				table.sort(kv)
-				local pos = nil
-				if desc:IsA("Model") then
-					local okPivot, cf = pcall(function() return desc:GetPivot() end)
-					if okPivot and cf then pos = cf.Position end
-				elseif desc:IsA("BasePart") then
-					pos = desc.Position
-				end
-				local dist = (myPos and pos) and math.floor((pos - myPos).Magnitude) or nil
-				local line = string.format(
-					"[Attr%s] %s (%s) -> {%s}",
-					dist and (" " .. dist .. "m") or "",
-					desc:GetFullName():gsub("^Workspace%.", ""),
-					desc.ClassName,
-					table.concat(kv, ", ")
-				)
-				if dist and dist <= 150 then
-					table.insert(nearbyLines, line)
-				elseif #globalAttrLines < 45 then
-					table.insert(globalAttrLines, line)
-				end
+				table.insert(lines, "  Attrs: {" .. table.concat(kv, ", ") .. "}")
 			end
 
-			-- Check ProximityPrompts
-			if desc:IsA("ProximityPrompt") then
-				local parentInst = desc.Parent
-				local pos = parentInst and parentInst:IsA("BasePart") and parentInst.Position or nil
-				local dist = (myPos and pos) and math.floor((pos - myPos).Magnitude) or nil
-				if not dist or dist <= 200 then
-					table.insert(
-						nearbyLines,
-						string.format(
-							"[Prompt%s] %s | Action=%q Object=%q",
-							dist and (" " .. dist .. "m") or "",
-							desc:GetFullName():gsub("^Workspace%.", ""),
-							tostring(desc.ActionText),
-							tostring(desc.ObjectText)
-						)
-					)
+			-- Descendant Attributes, TextLabels, ProximityPrompts, and ValueBases
+			for _, desc in ipairs(item:GetDescendants()) do
+				local dAttrs = desc:GetAttributes()
+				if next(dAttrs) ~= nil then
+					local kv = {}
+					for k, v in pairs(dAttrs) do
+						table.insert(kv, string.format("%s=%s", tostring(k), tostring(v)))
+					end
+					table.sort(kv)
+					local relPath = desc:GetFullName():gsub("^Workspace%." .. folderName .. "%.", "")
+					table.insert(lines, string.format("  [SubAttr] %s (%s) -> {%s}", relPath, desc.ClassName, table.concat(kv, ", ")))
 				end
-			end
 
-			-- Check BillboardGuis / SurfaceGuis in workspace
-			if desc:IsA("BillboardGui") or desc:IsA("SurfaceGui") then
-				local texts = {}
-				for _, sub in ipairs(desc:GetDescendants()) do
-					if sub:IsA("TextLabel") or sub:IsA("TextButton") then
-						local t = (sub.Text or ""):gsub("<[^>]+>", ""):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
-						if t ~= "" then
-							table.insert(texts, string.format("%s=%q", sub.Name, t))
-						end
+				if desc:IsA("TextLabel") or desc:IsA("TextButton") then
+					local t = (desc.Text or ""):gsub("<[^>]+>", ""):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+					if t ~= "" then
+						local relPath = desc:GetFullName():gsub("^Workspace%." .. folderName .. "%.", "")
+						table.insert(lines, string.format("  [Text] %s = %q", relPath, t))
 					end
-				end
-				if #texts > 0 then
-					local adornee = desc.Adornee or desc.Parent
-					local pos = nil
-					if adornee and adornee:IsA("BasePart") then
-						pos = adornee.Position
-					elseif adornee and adornee:IsA("Model") then
-						local okPivot, cf = pcall(function() return adornee:GetPivot() end)
-						if okPivot and cf then pos = cf.Position end
-					end
-					local dist = (myPos and pos) and math.floor((pos - myPos).Magnitude) or nil
-					local line = string.format(
-						"[UI%s] %s -> [%s]",
-						dist and (" " .. dist .. "m") or "",
-						desc:GetFullName():gsub("^Workspace%.", ""),
-						table.concat(texts, ", ")
-					)
-					if not dist or dist <= 180 then
-						table.insert(nearbyLines, line)
-					elseif #globalAttrLines < 45 then
-						table.insert(globalAttrLines, line)
-					end
-				end
-			end
-
-			-- Check ValueBase objects inside Models near player
-			if desc:IsA("ValueBase") then
-				local model = desc:FindFirstAncestorOfClass("Model")
-				if model and not seenModels[model] then
-					local okPivot, cf = pcall(function() return model:GetPivot() end)
-					local dist = (myPos and okPivot and cf) and math.floor((cf.Position - myPos).Magnitude) or nil
-					if dist and dist <= 120 then
-						seenModels[model] = true
-						local vals = {}
-						for _, vChild in ipairs(model:GetDescendants()) do
-							if vChild:IsA("ValueBase") then
-								table.insert(vals, string.format("%s=%s", vChild.Name, tostring(vChild.Value)))
-							end
-						end
-						table.insert(
-							nearbyLines,
-							string.format("[ModelVals %dm] %s -> {%s}", dist, model:GetFullName():gsub("^Workspace%.", ""), table.concat(vals, ", "))
-						)
-					end
+				elseif desc:IsA("ProximityPrompt") then
+					table.insert(lines, string.format("  [Prompt] %s: Action=%q Object=%q", desc.Name, tostring(desc.ActionText), tostring(desc.ObjectText)))
+				elseif desc:IsA("ValueBase") then
+					table.insert(lines, string.format("  [Val] %s = %s", desc.Name, tostring(desc.Value)))
 				end
 			end
 		end
 	end
 
-	local section1 = "-- Top Workspace Folders --\n" .. table.concat(topFolders, "\n") .. "\n\n-- Nearby Objects / Prompts / UI (<=180m) --\n" .. (#nearbyLines > 0 and table.concat(nearbyLines, "\n") or "None found near player")
-	if #section1 > 3800 then
-		section1 = section1:sub(1, 3800) .. "\n... (truncated)"
+	inspectFolder("AnimalPickups", 5)
+	inspectFolder("CarriedAnimals", 3)
+
+	-- Also check PromptAnchors near player in case prompts live in workspace.PromptAnchor
+	local promptLines = {}
+	for _, child in ipairs(workspace:GetChildren()) do
+		if child.Name == "PromptAnchor" and child:IsA("BasePart") then
+			local dist = myPos and math.floor((child.Position - myPos).Magnitude) or 9999
+			if dist <= 120 then
+				local attrs = child:GetAttributes()
+				local kv = {}
+				for k, v in pairs(attrs) do
+					table.insert(kv, string.format("%s=%s", tostring(k), tostring(v)))
+				end
+				for _, sub in ipairs(child:GetDescendants()) do
+					if sub:IsA("ProximityPrompt") then
+						table.insert(kv, string.format("Prompt(%q, %q)", tostring(sub.ActionText), tostring(sub.ObjectText)))
+					end
+					for k, v in pairs(sub:GetAttributes()) do
+						table.insert(kv, string.format("%s.%s=%s", sub.Name, tostring(k), tostring(v)))
+					end
+				end
+				table.insert(promptLines, string.format("[PromptAnchor %dm] {%s}", dist, table.concat(kv, ", ")))
+			end
+		end
+	end
+	if #promptLines > 0 then
+		table.insert(lines, "\n=== Nearby PromptAnchors ===")
+		for _, pl in ipairs(promptLines) do
+			table.insert(lines, pl)
+		end
+	end
+
+	local body = table.concat(lines, "\n")
+	if #body > 3800 then
+		body = body:sub(1, 3800) .. "\n... (truncated)"
 	end
 
 	local ok1, err1 = postDiscordEmbed({
-		title = "Workspace Pet/Egg Snapshot (Part 1: Nearby)",
-		description = "```text\n" .. section1 .. "\n```",
+		title = "AnimalPickups Inspector (v2.2)",
+		description = "```text\n" .. body .. "\n```",
 		color = 0xFEE75C,
 	})
 
-	if #globalAttrLines > 0 then
-		local section2 = table.concat(globalAttrLines, "\n")
-		if #section2 > 3800 then
-			section2 = section2:sub(1, 3800) .. "\n... (truncated)"
-		end
-		pcall(function()
-			postDiscordEmbed({
-				title = "Workspace Pet/Egg Snapshot (Part 2: Global Attributes/UI)",
-				description = "```text\n" .. section2 .. "\n```",
-				color = 0x57F287,
-			})
-		end)
-	end
-
 	if ok1 then
-		Library:Notify("Pet/Egg Snapshot sent to Discord!", 3)
+		Library:Notify("AnimalPickups Snapshot sent to Discord!", 3)
 	else
 		Library:Notify("Snapshot failed: " .. tostring(err1), 4)
 	end
