@@ -7,6 +7,9 @@ local cloneref = (cloneref or clonereference or function(instance)
 end)
 
 local Players = cloneref(game:GetService("Players"))
+local RunService = cloneref(game:GetService("RunService"))
+local Stats = cloneref(game:GetService("Stats"))
+local HttpService = cloneref(game:GetService("HttpService"))
 local TweenService = cloneref(game:GetService("TweenService"))
 local TeleportService = cloneref(game:GetService("TeleportService"))
 local GuiService = cloneref(game:GetService("GuiService"))
@@ -31,9 +34,22 @@ local Options = Library.Options
 local isRunning = false
 local antiAfkEnabled = true
 local autoReconnectEnabled = true
+local lockAnchorEnabled = true
+local lowPowerEnabled = false
+local afkFpsCap = 15
 local autoSaveEnabled = true
 local walkDistance = 4
 local pauseDuration = 4
+
+local webhookUrl = ""
+local webhookNotifyEvents = true
+local webhookHeartbeatEnabled = false
+local webhookIntervalMin = 30
+
+local anchorPosition = nil
+local sessionStartTime = os.clock()
+local completedCycles = 0
+local currentFps = 60
 local isInitializingConfig = true
 local hasQueuedTeleport = false
 local isReconnecting = false
@@ -42,20 +58,24 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v1.2",
+	FooterRight = "v1.3",
 	Username = true,
 	Badge = "Idle",
-	Size = UDim2.fromOffset(550, 420),
+	Size = UDim2.fromOffset(580, 460),
 	Center = true,
 	AutoShow = true,
 })
 
 local Tabs = {
 	Mover = Window:AddTab("Auto-Mover", "footprints"),
+	Utilities = Window:AddTab("AFK & Alerts", "bell"),
 	Config = Window:AddTab("Config", "folder-cog"),
 }
 
---// Left Groupbox: Controls & Configuration \\--
+--============================================================================--
+--// Tab 1: Auto-Mover (Controls, Visualizer, Session Dashboard)
+--============================================================================--
+
 local ControlsBox = Tabs.Mover:AddGroupbox({
 	Side = "Left",
 	Name = "Controls",
@@ -73,6 +93,23 @@ ControlsBox:AddCheckbox("AutoWASD", {
 	SyncToggleState = true,
 	Text = "Auto-Mover",
 })
+
+ControlsBox:AddCheckbox("LockAnchorPos", {
+	Text = "Stay on Spot (Anti-Drift)",
+	Default = true,
+	Tooltip = "Saves your starting position and walks back to it after each WASD cycle",
+})
+
+ControlsBox:AddButton("Reset Anchor to Current Spot", function()
+	local character = player.Character
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		anchorPosition = rootPart.Position
+		Library:Notify("Anchor spot updated to current position!", 2)
+	else
+		Library:Notify("Character not found.", 2)
+	end
+end)
 
 ControlsBox:AddCheckbox("AntiAFK", {
 	Text = "Anti-AFK (20m Bypass)",
@@ -121,7 +158,7 @@ ControlsBox:AddButton({
 	end,
 })
 
---// Right Groupbox: Live WASD Key Visualizer \\--
+--// Right Side: Live WASD Key Visualizer \\--
 local VisualizerBox = Tabs.Mover:AddGroupbox({
 	Side = "Right",
 	Name = "Key Visualizer",
@@ -136,7 +173,6 @@ local StatusLabel = VisualizerBox:AddLabel("StatusLabel", {
 
 VisualizerBox:AddDivider()
 
--- Custom WASD Keycap Widget embedded via AddUIPassthrough
 local keysContainer = Instance.new("Frame")
 keysContainer.Name = "WASDContainer"
 keysContainer.Size = UDim2.new(1, 0, 1, 0)
@@ -195,25 +231,106 @@ end
 
 VisualizerBox:AddUIPassthrough("WASDVisualizer", {
 	Instance = keysContainer,
-	Height = 90,
+	Height = 86,
 })
 
-local tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+--// Right Side: Live AFK Session Dashboard \\--
+local DashboardBox = Tabs.Mover:AddGroupbox({
+	Side = "Right",
+	Name = "Session Dashboard",
+	IconName = "activity",
+	Description = "Live AFK session statistics.",
+})
 
-local function highlightKey(activeKey)
-	for k, data in pairs(keyBoxes) do
-		local isCurrent = (k == activeKey)
-		TweenService:Create(data.Label, tweenInfo, {
-			BackgroundColor3 = isCurrent and activeBgColor or idleBgColor,
-			TextColor3 = isCurrent and activeTextColor or idleTextColor,
-		}):Play()
-		TweenService:Create(data.Stroke, tweenInfo, {
-			Color = isCurrent and activeBgColor or idleStrokeColor,
-		}):Play()
-	end
-end
+local UptimeLabel = DashboardBox:AddLabel("UptimeLabel", {
+	Text = "Uptime: 00h 00m 00s",
+	DoesWrap = false,
+})
 
---// Config Tab Setup \\--
+local CyclesLabel = DashboardBox:AddLabel("CyclesLabel", {
+	Text = "Cycles Completed: 0",
+	DoesWrap = false,
+})
+
+local PerfLabel = DashboardBox:AddLabel("PerfLabel", {
+	Text = "Performance: -- FPS | -- ms",
+	DoesWrap = false,
+})
+
+local DriftLabel = DashboardBox:AddLabel("DriftLabel", {
+	Text = "Anchor Drift: 0.0 studs",
+	DoesWrap = false,
+})
+
+--============================================================================--
+--// Tab 2: AFK & Alerts (CPU/GPU Saver + Discord Webhook)
+--============================================================================--
+
+local PowerBox = Tabs.Utilities:AddGroupbox({
+	Side = "Left",
+	Name = "CPU / GPU Saver",
+	IconName = "cpu",
+	Description = "Reduces power and heat during long AFK sessions.",
+})
+
+PowerBox:AddCheckbox("LowPowerMode", {
+	Text = "Low Power Mode (Disable 3D)",
+	Default = false,
+	Tooltip = "Disables 3D world rendering and caps FPS while keeping this UI visible",
+}):AddKeyPicker("LowPowerKey", {
+	Default = "L",
+	Mode = "Toggle",
+	SyncToggleState = true,
+	Text = "Low Power Mode",
+})
+
+PowerBox:AddSlider("AfkFpsCap", {
+	Text = "Low Power FPS Cap",
+	Default = afkFpsCap,
+	Min = 5,
+	Max = 60,
+	Rounding = 0,
+	Suffix = " FPS",
+})
+
+local WebhookBox = Tabs.Utilities:AddGroupbox({
+	Side = "Right",
+	Name = "Discord Webhook Alerts",
+	IconName = "bell",
+	Description = "Get notified on Discord when disconnected or during AFK.",
+})
+
+WebhookBox:AddInput("WebhookUrl", {
+	Text = "Webhook URL",
+	Placeholder = "https://discord.com/api/webhooks/...",
+	ClearTextOnFocus = false,
+})
+
+WebhookBox:AddCheckbox("WebhookNotifyEvents", {
+	Text = "Alert on Disconnect & Rejoin",
+	Default = true,
+	Tooltip = "Sends a Discord alert when kicked/disconnected and when reconnected",
+})
+
+WebhookBox:AddCheckbox("WebhookHeartbeat", {
+	Text = "Periodic AFK Heartbeat",
+	Default = false,
+	Tooltip = "Sends a periodic status summary to Discord",
+})
+
+WebhookBox:AddSlider("WebhookInterval", {
+	Text = "Heartbeat Interval",
+	Default = webhookIntervalMin,
+	Min = 5,
+	Max = 120,
+	Rounding = 0,
+	Suffix = " min",
+})
+
+--============================================================================--
+--// Tab 3: Config (Quick Config & SaveManager)
+--============================================================================--
+
 SaveManager:SetLibrary(Library)
 SaveManager:IgnoreThemeSettings()
 SaveManager:SetIgnoreIndexes({ "MenuKeybind", "AutoSaveChanges" })
@@ -262,7 +379,92 @@ local function autoSaveActiveConfig()
 	end
 end
 
---// Anti-AFK (Prevents Roblox 20-Minute Idle Kick / Error 278) \\--
+--============================================================================--
+--// Helpers: Formatting, Power Saver & Webhook
+--============================================================================--
+
+local function formatDuration(seconds)
+	local total = math.max(0, math.floor(seconds))
+	local hrs = math.floor(total / 3600)
+	local mins = math.floor((total % 3600) / 60)
+	local secs = total % 60
+	return string.format("%02dh %02dm %02ds", hrs, mins, secs)
+end
+
+local function applyLowPowerState(enabled)
+	pcall(function()
+		RunService:Set3dRenderingEnabled(not enabled)
+	end)
+	local setFps = setfpscap or set_fps_cap
+	if setFps then
+		pcall(function()
+			setFps(enabled and afkFpsCap or 60)
+		end)
+	end
+end
+
+local function sendDiscordWebhook(title, description, colorHex)
+	local url = (webhookUrl or ""):match("^%s*(.-)%s*$")
+	if url == "" or not url:find("^https://discord%.com/api/webhooks/") and not url:find("^https://discordapp%.com/api/webhooks/") then
+		return false, "Invalid or empty Discord Webhook URL"
+	end
+
+	local httpRequest = request or http_request or (syn and syn.request) or (fluxus and fluxus.request)
+	if not httpRequest then
+		return false, "Executor does not support HTTP requests"
+	end
+
+	local payload = {
+		username = "Allain-afk Auto-Mover",
+		embeds = {
+			{
+				title = title,
+				description = description,
+				color = colorHex or 0x5865F2,
+				fields = {
+					{ name = "Player", value = tostring(player.Name), inline = true },
+					{ name = "Uptime", value = formatDuration(os.clock() - sessionStartTime), inline = true },
+					{ name = "Cycles", value = tostring(completedCycles), inline = true },
+				},
+				footer = {
+					text = "Allain-afk · WASD Auto-Mover v1.3",
+				},
+				timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+			},
+		},
+	}
+
+	local ok, err = pcall(function()
+		httpRequest({
+			Url = url,
+			Method = "POST",
+			Headers = {
+				["Content-Type"] = "application/json",
+			},
+			Body = HttpService:JSONEncode(payload),
+		})
+	end)
+
+	return ok, err
+end
+
+WebhookBox:AddButton("Send Test Webhook", function()
+	local ok, err = sendDiscordWebhook(
+		"Webhook Connected",
+		"Your Discord webhook is configured and working properly.",
+		0x57F287
+	)
+	if ok then
+		Library:Notify("Test webhook sent to Discord!", 3)
+	else
+		Library:Notify("Webhook failed: " .. tostring(err), 4)
+	end
+end)
+
+--============================================================================--
+--// Anti-AFK (Prevents Roblox 20-Minute Idle Kick / Error 278)
+--============================================================================--
+
 local function pulseAntiAfk()
 	pcall(function()
 		VirtualUser:CaptureController()
@@ -299,7 +501,10 @@ local idledConnection = player.Idled:Connect(function()
 	end
 end)
 
---// Auto-Reconnect & Auto-Execute (queue_on_teleport) \\--
+--============================================================================--
+--// Auto-Reconnect & Auto-Execute (queue_on_teleport)
+--============================================================================--
+
 local function getQueueOnTeleport()
 	return queue_on_teleport
 		or (syn and syn.queue_on_teleport)
@@ -318,6 +523,7 @@ local function queueScriptForTeleport()
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
+shared.__AllainReconnected = true
 loadstring(game:HttpGet(%q))()
 ]], scriptUrl))
 		end)
@@ -340,6 +546,16 @@ local function triggerReconnect(reason)
 	isReconnecting = true
 	StatusLabel:SetText("Status: Disconnected — Reconnecting...")
 	Window:SetBadge("Reconnecting")
+
+	if webhookNotifyEvents then
+		task.spawn(function()
+			sendDiscordWebhook(
+				"Disconnected from Server",
+				string.format("Reason: `%s`\nAttempting auto-reconnect...", tostring(reason or "Unknown")),
+				0xED4245
+			)
+		end)
+	end
 
 	queueScriptForTeleport()
 
@@ -391,7 +607,25 @@ task.spawn(function()
 	end
 end)
 
---// WASD Movement Automation \\--
+--============================================================================--
+--// WASD Movement Automation + Anchor Anti-Drift
+--============================================================================--
+
+local tweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+
+local function highlightKey(activeKey)
+	for k, data in pairs(keyBoxes) do
+		local isCurrent = (k == activeKey)
+		TweenService:Create(data.Label, tweenInfo, {
+			BackgroundColor3 = isCurrent and activeBgColor or idleBgColor,
+			TextColor3 = isCurrent and activeTextColor or idleTextColor,
+		}):Play()
+		TweenService:Create(data.Stroke, tweenInfo, {
+			Color = isCurrent and activeBgColor or idleStrokeColor,
+		}):Play()
+	end
+end
+
 local directions = {
 	{ key = "W", keyCode = Enum.KeyCode.W, label = "Forward (W)", getOffset = function(cf, dist) return cf.LookVector * dist end },
 	{ key = "A", keyCode = Enum.KeyCode.A, label = "Left (A)", getOffset = function(cf, dist) return -cf.RightVector * dist end },
@@ -407,28 +641,10 @@ local function sendKeyState(keyCode, isDown)
 	end
 end
 
-local function moveStep(dirData)
-	local character = player.Character or player.CharacterAdded:Wait()
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	local rootPart = character:FindFirstChild("HumanoidRootPart")
-	if not humanoid or not rootPart then
-		return
-	end
-
-	-- Reset Roblox's internal input timer alongside movement
-	if antiAfkEnabled then
-		pulseAntiAfk()
-	end
-
+local function walkToPoint(humanoid, rootPart, targetPosition, maxDistance)
 	local startPos = rootPart.Position
-	local targetPosition = startPos + dirData.getOffset(rootPart.CFrame, walkDistance)
 	local speed = math.max(humanoid.WalkSpeed, 1)
-	local maxStepTime = math.clamp((walkDistance / speed) + 0.15, 0.15, 2.0)
-
-	-- Brief key tap registers hardware input for Anti-AFK without cancelling MoveTo
-	sendKeyState(dirData.keyCode, true)
-	task.wait(0.03)
-	sendKeyState(dirData.keyCode, false)
+	local maxStepTime = math.clamp((maxDistance / speed) + 0.15, 0.15, 2.5)
 
 	humanoid:MoveTo(targetPosition)
 
@@ -440,7 +656,7 @@ local function moveStep(dirData)
 
 	local startWait = os.clock()
 	while isRunning and not Library.Unloaded and not reached and (os.clock() - startWait) < maxStepTime do
-		if (rootPart.Position - startPos).Magnitude >= walkDistance then
+		if (rootPart.Position - startPos).Magnitude >= maxDistance then
 			break
 		end
 		task.wait(0.03)
@@ -451,7 +667,55 @@ local function moveStep(dirData)
 	end
 end
 
---// Main Loop \\--
+local function moveStep(dirData)
+	local character = player.Character or player.CharacterAdded:Wait()
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not rootPart then
+		return
+	end
+
+	if not anchorPosition then
+		anchorPosition = rootPart.Position
+	end
+
+	if antiAfkEnabled then
+		pulseAntiAfk()
+	end
+
+	-- Brief key tap registers hardware input for Anti-AFK without cancelling MoveTo
+	sendKeyState(dirData.keyCode, true)
+	task.wait(0.03)
+	sendKeyState(dirData.keyCode, false)
+
+	local targetPosition = rootPart.Position + dirData.getOffset(rootPart.CFrame, walkDistance)
+	walkToPoint(humanoid, rootPart, targetPosition, walkDistance)
+end
+
+local function returnToAnchor()
+	if not lockAnchorEnabled or not anchorPosition then
+		return
+	end
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not rootPart then
+		return
+	end
+
+	local flatDelta = Vector3.new(
+		anchorPosition.X - rootPart.Position.X,
+		0,
+		anchorPosition.Z - rootPart.Position.Z
+	)
+	local driftDist = flatDelta.Magnitude
+	if driftDist > 1.2 then
+		StatusLabel:SetText("Status: Correcting drift...")
+		walkToPoint(humanoid, rootPart, anchorPosition, driftDist + 0.5)
+	end
+end
+
+--// Main WASD Loop \\--
 task.spawn(function()
 	while not Library.Unloaded do
 		if isRunning then
@@ -465,6 +729,12 @@ task.spawn(function()
 				task.wait(0.15)
 			end
 			highlightKey(nil)
+
+			if isRunning and not Library.Unloaded then
+				returnToAnchor()
+				completedCycles += 1
+				CyclesLabel:SetText("Cycles Completed: " .. tostring(completedCycles))
+			end
 
 			if isRunning and not Library.Unloaded and pauseDuration > 0 then
 				StatusLabel:SetText(string.format("Status: Waiting (%.1fs)", pauseDuration))
@@ -480,13 +750,80 @@ task.spawn(function()
 	end
 end)
 
---// UI Event Bindings \\--
+--// Live Session Dashboard & Heartbeat Loop \\--
+local renderSteppedConn = RunService.RenderStepped:Connect(function(dt)
+	if dt > 0 then
+		currentFps = math.clamp(math.floor(1 / dt + 0.5), 1, 999)
+	end
+end)
+
+task.spawn(function()
+	local lastHeartbeat = os.clock()
+	while not Library.Unloaded do
+		UptimeLabel:SetText("Uptime: " .. formatDuration(os.clock() - sessionStartTime))
+
+		local pingMs = 0
+		pcall(function()
+			pingMs = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+		end)
+		PerfLabel:SetText(string.format("Performance: %d FPS | %d ms", currentFps, pingMs))
+
+		local character = player.Character
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+		if rootPart and anchorPosition then
+			local drift = Vector3.new(
+				rootPart.Position.X - anchorPosition.X,
+				0,
+				rootPart.Position.Z - anchorPosition.Z
+			).Magnitude
+			DriftLabel:SetText(string.format("Anchor Drift: %.1f studs", drift))
+		else
+			DriftLabel:SetText("Anchor Drift: 0.0 studs")
+		end
+
+		if webhookHeartbeatEnabled and (os.clock() - lastHeartbeat) >= (webhookIntervalMin * 60) then
+			lastHeartbeat = os.clock()
+			task.spawn(function()
+				sendDiscordWebhook(
+					"AFK Heartbeat",
+					string.format("Auto-Mover is currently **%s**.", isRunning and "Running" or "Idle"),
+					0x5865F2
+				)
+			end)
+		end
+
+		task.wait(1)
+	end
+end)
+
+--============================================================================--
+--// UI Event Bindings
+--============================================================================--
+
 Toggles.AutoWASD:OnChanged(function(Value)
 	isRunning = Value
+	if Value then
+		local character = player.Character
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+		if rootPart then
+			anchorPosition = rootPart.Position
+		end
+	else
+		highlightKey(nil)
+	end
 	Window:SetBadge(Value and "Running" or "Idle")
 	StatusLabel:SetText(Value and "Status: Starting..." or "Status: Idle")
-	if not Value then
-		highlightKey(nil)
+	autoSaveActiveConfig()
+end)
+
+Toggles.LockAnchorPos:OnChanged(function(Value)
+	lockAnchorEnabled = Value
+	if Value then
+		local character = player.Character
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+		if rootPart then
+			anchorPosition = rootPart.Position
+		end
 	end
 	autoSaveActiveConfig()
 end)
@@ -502,6 +839,40 @@ Toggles.AutoReconnect:OnChanged(function(Value)
 	if Value then
 		queueScriptForTeleport()
 	end
+	autoSaveActiveConfig()
+end)
+
+Toggles.LowPowerMode:OnChanged(function(Value)
+	lowPowerEnabled = Value
+	applyLowPowerState(Value)
+	autoSaveActiveConfig()
+end)
+
+Options.AfkFpsCap:OnChanged(function(Value)
+	afkFpsCap = Value
+	if lowPowerEnabled then
+		applyLowPowerState(true)
+	end
+	autoSaveActiveConfig()
+end)
+
+Options.WebhookUrl:OnChanged(function(Value)
+	webhookUrl = Value
+	autoSaveActiveConfig()
+end)
+
+Toggles.WebhookNotifyEvents:OnChanged(function(Value)
+	webhookNotifyEvents = Value
+	autoSaveActiveConfig()
+end)
+
+Toggles.WebhookHeartbeat:OnChanged(function(Value)
+	webhookHeartbeatEnabled = Value
+	autoSaveActiveConfig()
+end)
+
+Options.WebhookInterval:OnChanged(function(Value)
+	webhookIntervalMin = Value
 	autoSaveActiveConfig()
 end)
 
@@ -523,19 +894,37 @@ Options.AutoWASDKey:OnChanged(function()
 	autoSaveActiveConfig()
 end)
 
+Options.LowPowerKey:OnChanged(function()
+	autoSaveActiveConfig()
+end)
+
 --// Load Autoload Config on Startup \\--
 SaveManager:LoadAutoloadConfig()
 if autoReconnectEnabled then
 	queueScriptForTeleport()
 end
-task.delay(0.5, function()
+task.delay(0.6, function()
 	isInitializingConfig = false
+	if shared.__AllainReconnected and webhookNotifyEvents then
+		shared.__AllainReconnected = nil
+		sendDiscordWebhook(
+			"Reconnected to Server",
+			"Successfully rejoined the game and auto-executed the WASD script.",
+			0x57F287
+		)
+	end
 end)
 
 Library:OnUnload(function()
 	isRunning = false
 	antiAfkEnabled = false
 	autoReconnectEnabled = false
+	if lowPowerEnabled then
+		applyLowPowerState(false)
+	end
+	if renderSteppedConn then
+		renderSteppedConn:Disconnect()
+	end
 	if idledConnection then
 		idledConnection:Disconnect()
 	end
