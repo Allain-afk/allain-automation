@@ -44,7 +44,7 @@ local pauseDuration = 4
 local webhookUrl = ""
 local webhookNotifyEvents = true
 local webhookHeartbeatEnabled = false
-local webhookIntervalMin = 30
+local webhookIntervalMin = 20
 
 local anchorPosition = nil
 local sessionStartTime = os.clock()
@@ -58,7 +58,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v1.3",
+	FooterRight = "v1.4",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
@@ -297,7 +297,7 @@ local WebhookBox = Tabs.Utilities:AddGroupbox({
 	Side = "Right",
 	Name = "Discord Webhook Alerts",
 	IconName = "bell",
-	Description = "Get notified on Discord when disconnected or during AFK.",
+	Description = "Sends read-only game progress & AFK status to Discord.",
 })
 
 WebhookBox:AddInput("WebhookUrl", {
@@ -313,13 +313,13 @@ WebhookBox:AddCheckbox("WebhookNotifyEvents", {
 })
 
 WebhookBox:AddCheckbox("WebhookHeartbeat", {
-	Text = "Periodic AFK Heartbeat",
+	Text = "Periodic Progress Report",
 	Default = false,
-	Tooltip = "Sends a periodic status summary to Discord",
+	Tooltip = "Sends your Cash, Speed, Pets, and Session progress to Discord",
 })
 
 WebhookBox:AddSlider("WebhookInterval", {
-	Text = "Heartbeat Interval",
+	Text = "Report Interval",
 	Default = webhookIntervalMin,
 	Min = 5,
 	Max = 120,
@@ -380,8 +380,65 @@ local function autoSaveActiveConfig()
 end
 
 --============================================================================--
---// Helpers: Formatting, Power Saver & Webhook
+--// Read-Only Player Progress Collector & Number Formatter
 --============================================================================--
+
+local suffixes = {
+	{ "Dc", 1e33 },
+	{ "No", 1e30 },
+	{ "Oc", 1e27 },
+	{ "Sp", 1e24 },
+	{ "Sx", 1e21 },
+	{ "Qi", 1e18 },
+	{ "Qa", 1e15 },
+	{ "T", 1e12 },
+	{ "B", 1e9 },
+	{ "M", 1e6 },
+	{ "K", 1e3 },
+}
+
+local suffixMultipliers = {}
+for _, pair in ipairs(suffixes) do
+	suffixMultipliers[pair[1]:lower()] = pair[2]
+end
+
+local function formatAbbreviatedNumber(num)
+	if typeof(num) ~= "number" or num ~= num then
+		return "0"
+	end
+	local absNum = math.abs(num)
+	for _, pair in ipairs(suffixes) do
+		if absNum >= pair[2] then
+			return string.format("%.1f%s", num / pair[2], pair[1]):gsub("%.0([A-Za-z])", "%1")
+		end
+	end
+	return tostring(math.floor(num + 0.5))
+end
+
+local function parseAbbreviatedNumber(str)
+	if typeof(str) == "number" then
+		return str
+	end
+	if typeof(str) ~= "string" then
+		return nil
+	end
+	local cleaned = str:gsub(",", ""):gsub("%$", ""):gsub("%s+", "")
+	local numPart, suffixPart = cleaned:match("^([%+%-]?%d+%.?%d*)([A-Za-z]*)$")
+	if not numPart then
+		numPart, suffixPart = cleaned:match("([%+%-]?%d+%.?%d*)([A-Za-z]+)")
+	end
+	local val = tonumber(numPart)
+	if not val then
+		return nil
+	end
+	if suffixPart and suffixPart ~= "" then
+		local mult = suffixMultipliers[suffixPart:lower()]
+		if mult then
+			val = val * mult
+		end
+	end
+	return val
+end
 
 local function formatDuration(seconds)
 	local total = math.max(0, math.floor(seconds))
@@ -390,6 +447,249 @@ local function formatDuration(seconds)
 	local secs = total % 60
 	return string.format("%02dh %02dm %02ds", hrs, mins, secs)
 end
+
+local function formatShortDuration(seconds)
+	local total = math.max(0, math.floor(seconds))
+	local hrs = math.floor(total / 3600)
+	local mins = math.floor((total % 3600) / 60)
+	local secs = total % 60
+	if hrs > 0 then
+		return string.format("%dh %dm", hrs, mins)
+	end
+	return string.format("%dm %ds", mins, secs)
+end
+
+local function findStatFromPlayerInstances(names)
+	-- 1. Check Player Attributes
+	local attrs = player:GetAttributes()
+	for attrName, attrVal in pairs(attrs) do
+		local lower = attrName:lower()
+		for _, target in ipairs(names) do
+			if lower == target or lower:find(target, 1, true) then
+				return attrVal
+			end
+		end
+	end
+
+	-- 2. Check leaderstats & direct child folders on Player
+	for _, folder in ipairs(player:GetChildren()) do
+		if folder:IsA("Folder") or folder:IsA("Configuration") then
+			for _, child in ipairs(folder:GetDescendants()) do
+				if child:IsA("ValueBase") then
+					local lower = child.Name:lower()
+					for _, target in ipairs(names) do
+						if lower == target or lower:find(target, 1, true) then
+							return child.Value
+						end
+					end
+				end
+			end
+		elseif folder:IsA("ValueBase") then
+			local lower = folder.Name:lower()
+			for _, target in ipairs(names) do
+				if lower == target or lower:find(target, 1, true) then
+					return folder.Value
+				end
+			end
+		end
+	end
+
+	return nil
+end
+
+local function scanPlayerGuiStats()
+	local guiData = {
+		cashText = nil,
+		rateText = nil,
+		speedText = nil,
+		petsText = nil,
+		candyText = nil,
+	}
+
+	local playerGui = player:FindFirstChild("PlayerGui")
+	if not playerGui then
+		return guiData
+	end
+
+	for _, desc in ipairs(playerGui:GetDescendants()) do
+		if desc:IsA("TextLabel") or desc:IsA("TextButton") then
+			local text = desc.Text or ""
+			local nameLower = desc.Name:lower()
+			local parentNameLower = (desc.Parent and desc.Parent.Name or ""):lower()
+
+			if text ~= "" and #text < 60 then
+				-- Pet inventory counter e.g. "51/250"
+				if not guiData.petsText then
+					local curPets, maxPets = text:match("^(%d+)%s*/%s*(%d+)$")
+					if not curPets then
+						curPets, maxPets = text:match("(%d+)%s*/%s*(%d+)%s*[Pp]ets?")
+					end
+					if curPets and maxPets and tonumber(maxPets) and tonumber(maxPets) >= 10 then
+						if nameLower:find("pet") or nameLower:find("inv") or nameLower:find("cap") or parentNameLower:find("pet") or parentNameLower:find("inv") or tonumber(maxPets) >= 50 then
+							guiData.petsText = string.format("%s/%s in inventory", curPets, maxPets)
+						end
+					end
+				end
+
+				-- Cash per second e.g. "+60.7T/s" or "$60.7T/s"
+				if not guiData.rateText then
+					local rateMatch = text:match("([%+%-]?%$?%d+%.?%d*[A-Za-z]*/s)")
+					if rateMatch then
+						if not rateMatch:find("^[%+%-]") then
+							rateMatch = "+" .. rateMatch
+						end
+						guiData.rateText = rateMatch
+					end
+				end
+
+				-- Cash total e.g. "$5.7Qi"
+				if not guiData.cashText and not text:find("/s") then
+					local cashMatch = text:match("^%$(%d+%.?%d*[A-Za-z]+)$") or text:match("^%$([%d,%.]+)$")
+					if cashMatch or ((nameLower:find("cash") or nameLower:find("money") or parentNameLower:find("cash") or parentNameLower:find("money")) and text:find("%d")) then
+						local extracted = text:match("%$?([%d,%.]+[A-Za-z]*)")
+						if extracted then
+							guiData.cashText = "$" .. extracted
+						end
+					end
+				end
+
+				-- Speed e.g. "26T"
+				if not guiData.speedText then
+					if (nameLower:find("speed") or parentNameLower:find("speed")) and not text:lower():find("walk speed") then
+						local speedVal = text:match("(%d+%.?%d*[A-Za-z]*)")
+						if speedVal then
+							guiData.speedText = speedVal
+						end
+					end
+				end
+
+				-- Candy
+				if not guiData.candyText then
+					if nameLower:find("candy") or nameLower:find("candies") or parentNameLower:find("candy") then
+						local candyVal = text:match("(%d+%.?%d*[A-Za-z]*)")
+						if candyVal then
+							guiData.candyText = candyVal
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return guiData
+end
+
+-- Track cash history to calculate exact gain over report window & per-second rate
+local lastCashNumber = nil
+local lastCashTimestamp = os.clock()
+local lastReportCashNumber = nil
+local lastReportTimestamp = os.clock()
+local smoothedCashPerSec = 0
+
+local function collectProgressSnapshot(isReportReset)
+	local now = os.clock()
+	local guiData = scanPlayerGuiStats()
+
+	-- 1. Cash
+	local rawCash = findStatFromPlayerInstances({ "cash", "money", "coins", "bucks" })
+	local currentCashNum = parseAbbreviatedNumber(rawCash) or parseAbbreviatedNumber(guiData.cashText)
+	local formattedCash = guiData.cashText
+	if rawCash ~= nil then
+		if typeof(rawCash) == "number" then
+			formattedCash = "$" .. formatAbbreviatedNumber(rawCash)
+		else
+			local s = tostring(rawCash)
+			formattedCash = s:find("^%$") and s or ("$" .. s)
+		end
+	end
+	formattedCash = formattedCash or "N/A"
+
+	-- Rate (/s) & Interval Delta
+	if currentCashNum then
+		if lastCashNumber and (now - lastCashTimestamp) >= 1 then
+			local instantRate = (currentCashNum - lastCashNumber) / (now - lastCashTimestamp)
+			if instantRate >= 0 then
+				smoothedCashPerSec = smoothedCashPerSec == 0 and instantRate or (smoothedCashPerSec * 0.7 + instantRate * 0.3)
+			end
+		end
+		lastCashNumber = currentCashNum
+		lastCashTimestamp = now
+
+		if not lastReportCashNumber then
+			lastReportCashNumber = currentCashNum
+			lastReportTimestamp = now
+		end
+	end
+
+	local rateStr = guiData.rateText
+	if not rateStr and smoothedCashPerSec > 0 then
+		rateStr = "+" .. formatAbbreviatedNumber(smoothedCashPerSec) .. "/s"
+	end
+
+	local cashFieldLines = {
+		rateStr and string.format("%s (%s)", formattedCash, rateStr) or formattedCash,
+	}
+
+	if currentCashNum and lastReportCashNumber then
+		local gained = math.max(0, currentCashNum - lastReportCashNumber)
+		local elapsed = math.max(1, now - lastReportTimestamp)
+		table.insert(cashFieldLines, string.format("+$%s in %s", formatAbbreviatedNumber(gained), formatShortDuration(elapsed)))
+		if isReportReset then
+			lastReportCashNumber = currentCashNum
+			lastReportTimestamp = now
+		end
+	end
+
+	-- 2. Speed
+	local rawSpeed = findStatFromPlayerInstances({ "speed", "walkspeed", "power" })
+	local speedStr = guiData.speedText
+	if rawSpeed ~= nil then
+		speedStr = typeof(rawSpeed) == "number" and formatAbbreviatedNumber(rawSpeed) or tostring(rawSpeed)
+	elseif not speedStr then
+		local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		if hum then
+			speedStr = formatAbbreviatedNumber(hum.WalkSpeed)
+		end
+	end
+	speedStr = speedStr or "N/A"
+
+	-- 3. Pets
+	local petsStr = guiData.petsText
+	if not petsStr then
+		local petsFolder = player:FindFirstChild("Pets") or player:FindFirstChild("Inventory")
+		if petsFolder then
+			petsStr = string.format("%d in inventory", #petsFolder:GetChildren())
+		else
+			petsStr = "N/A"
+		end
+	end
+
+	-- 4. Candy
+	local rawCandy = findStatFromPlayerInstances({ "candy", "candies", "gems", "tickets" })
+	local candyStr = guiData.candyText
+	if rawCandy ~= nil then
+		candyStr = typeof(rawCandy) == "number" and formatAbbreviatedNumber(rawCandy) or tostring(rawCandy)
+	end
+	candyStr = candyStr or "0"
+
+	-- 5. Doing
+	local doingStr = isRunning
+		and string.format("WASD Auto-Mover (%d studs, %.1fs pause)%s", walkDistance, pauseDuration, lockAnchorEnabled and " [Spot Locked]" or "")
+		or "Idle (Auto-Mover Paused)"
+
+	return {
+		cash = table.concat(cashFieldLines, "\n"),
+		speed = speedStr,
+		pets = petsStr,
+		session = string.format("%d WASD cycles", completedCycles),
+		candy = candyStr,
+		doing = doingStr,
+	}
+end
+
+--============================================================================--
+--// Helpers: Power Saver & Discord Webhook Sender
+--============================================================================--
 
 local function applyLowPowerState(enabled)
 	pcall(function()
@@ -403,9 +703,9 @@ local function applyLowPowerState(enabled)
 	end
 end
 
-local function sendDiscordWebhook(title, description, colorHex)
+local function postDiscordEmbed(embedTable)
 	local url = (webhookUrl or ""):match("^%s*(.-)%s*$")
-	if url == "" or not url:find("^https://discord%.com/api/webhooks/") and not url:find("^https://discordapp%.com/api/webhooks/") then
+	if url == "" or (not url:find("^https://discord%.com/api/webhooks/") and not url:find("^https://discordapp%.com/api/webhooks/")) then
 		return false, "Invalid or empty Discord Webhook URL"
 	end
 
@@ -416,22 +716,7 @@ local function sendDiscordWebhook(title, description, colorHex)
 
 	local payload = {
 		username = "Allain-afk Auto-Mover",
-		embeds = {
-			{
-				title = title,
-				description = description,
-				color = colorHex or 0x5865F2,
-				fields = {
-					{ name = "Player", value = tostring(player.Name), inline = true },
-					{ name = "Uptime", value = formatDuration(os.clock() - sessionStartTime), inline = true },
-					{ name = "Cycles", value = tostring(completedCycles), inline = true },
-				},
-				footer = {
-					text = "Allain-afk · WASD Auto-Mover v1.3",
-				},
-				timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-			},
-		},
+		embeds = { embedTable },
 	}
 
 	local ok, err = pcall(function()
@@ -448,14 +733,44 @@ local function sendDiscordWebhook(title, description, colorHex)
 	return ok, err
 end
 
-WebhookBox:AddButton("Send Test Webhook", function()
-	local ok, err = sendDiscordWebhook(
-		"Webhook Connected",
-		"Your Discord webhook is configured and working properly.",
-		0x57F287
-	)
+local function sendProgressWebhook(customTitle, customColor, isReportReset)
+	local stats = collectProgressSnapshot(isReportReset)
+	return postDiscordEmbed({
+		title = customTitle or ("Progress for " .. tostring(player.Name)),
+		description = "Playing for " .. formatShortDuration(os.clock() - sessionStartTime),
+		color = customColor or 0x5865F2,
+		fields = {
+			{ name = "Cash", value = stats.cash, inline = true },
+			{ name = "Speed", value = stats.speed, inline = true },
+			{ name = "Pets", value = stats.pets, inline = true },
+			{ name = "This session", value = stats.session, inline = true },
+			{ name = "Candy", value = stats.candy, inline = true },
+			{ name = "Doing", value = stats.doing, inline = true },
+		},
+	})
+end
+
+local function sendEventWebhook(title, description, colorHex)
+	local stats = collectProgressSnapshot(false)
+	return postDiscordEmbed({
+		title = title,
+		description = description .. "\nPlaying for " .. formatShortDuration(os.clock() - sessionStartTime),
+		color = colorHex or 0x5865F2,
+		fields = {
+			{ name = "Cash", value = stats.cash, inline = true },
+			{ name = "Speed", value = stats.speed, inline = true },
+			{ name = "Pets", value = stats.pets, inline = true },
+			{ name = "This session", value = stats.session, inline = true },
+			{ name = "Candy", value = stats.candy, inline = true },
+			{ name = "Doing", value = stats.doing, inline = true },
+		},
+	})
+end
+
+WebhookBox:AddButton("Send Test Progress Webhook", function()
+	local ok, err = sendProgressWebhook(nil, 0x5865F2, false)
 	if ok then
-		Library:Notify("Test webhook sent to Discord!", 3)
+		Library:Notify("Progress report sent to Discord!", 3)
 	else
 		Library:Notify("Webhook failed: " .. tostring(err), 4)
 	end
@@ -549,9 +864,9 @@ local function triggerReconnect(reason)
 
 	if webhookNotifyEvents then
 		task.spawn(function()
-			sendDiscordWebhook(
-				"Disconnected from Server",
-				string.format("Reason: `%s`\nAttempting auto-reconnect...", tostring(reason or "Unknown")),
+			sendEventWebhook(
+				"Disconnected — " .. tostring(player.Name),
+				string.format("Reason: `%s` — Attempting auto-reconnect...", tostring(reason or "Unknown")),
 				0xED4245
 			)
 		end)
@@ -759,8 +1074,10 @@ end)
 
 task.spawn(function()
 	local lastHeartbeat = os.clock()
+	local lastStatSample = 0
 	while not Library.Unloaded do
-		UptimeLabel:SetText("Uptime: " .. formatDuration(os.clock() - sessionStartTime))
+		local now = os.clock()
+		UptimeLabel:SetText("Uptime: " .. formatDuration(now - sessionStartTime))
 
 		local pingMs = 0
 		pcall(function()
@@ -781,14 +1098,16 @@ task.spawn(function()
 			DriftLabel:SetText("Anchor Drift: 0.0 studs")
 		end
 
-		if webhookHeartbeatEnabled and (os.clock() - lastHeartbeat) >= (webhookIntervalMin * 60) then
-			lastHeartbeat = os.clock()
+		-- Sample cash every 5s to keep the per-second rate and session gain accurate
+		if (now - lastStatSample) >= 5 then
+			lastStatSample = now
+			pcall(collectProgressSnapshot, false)
+		end
+
+		if webhookHeartbeatEnabled and (now - lastHeartbeat) >= (webhookIntervalMin * 60) then
+			lastHeartbeat = now
 			task.spawn(function()
-				sendDiscordWebhook(
-					"AFK Heartbeat",
-					string.format("Auto-Mover is currently **%s**.", isRunning and "Running" or "Idle"),
-					0x5865F2
-				)
+				sendProgressWebhook(nil, 0x5865F2, true)
 			end)
 		end
 
@@ -905,11 +1224,12 @@ if autoReconnectEnabled then
 end
 task.delay(0.6, function()
 	isInitializingConfig = false
+	pcall(collectProgressSnapshot, false)
 	if shared.__AllainReconnected and webhookNotifyEvents then
 		shared.__AllainReconnected = nil
-		sendDiscordWebhook(
-			"Reconnected to Server",
-			"Successfully rejoined the game and auto-executed the WASD script.",
+		sendEventWebhook(
+			"Reconnected — " .. tostring(player.Name),
+			"Successfully rejoined the server and resumed AFK session.",
 			0x57F287
 		)
 	end
