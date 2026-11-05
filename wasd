@@ -1,19 +1,28 @@
-local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
-local VirtualUser = game:GetService("VirtualUser")
-local VirtualInputManager = pcall(function()
-	return game:GetService("VirtualInputManager")
-end) and game:GetService("VirtualInputManager") or nil
-
-local player = Players.LocalPlayer
-if not player then
-	warn("[AutoWASD] This script must run as a LocalScript on the client, not a server Script!")
-	return
+if not game:IsLoaded() then
+	game.Loaded:Wait()
 end
 
---// Load Alexandria Library \\--
+local cloneref = (cloneref or clonereference or function(instance)
+	return instance
+end)
+
+local Players = cloneref(game:GetService("Players"))
+local TweenService = cloneref(game:GetService("TweenService"))
+local TeleportService = cloneref(game:GetService("TeleportService"))
+local GuiService = cloneref(game:GetService("GuiService"))
+local CoreGui = cloneref(game:GetService("CoreGui"))
+local VirtualUser = cloneref(game:GetService("VirtualUser"))
+local VirtualInputManager = pcall(function()
+	return game:GetService("VirtualInputManager")
+end) and cloneref(game:GetService("VirtualInputManager")) or nil
+
+local player = Players.LocalPlayer or Players.PlayerAdded:Wait()
+
+--// Load Alexandria Library & SaveManager \\--
 local repo = "https://raw.githubusercontent.com/Allain-afk/allain-automation/main/"
+local scriptUrl = repo .. "wasd"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
 
 local Toggles = Library.Toggles
 local Options = Library.Options
@@ -21,23 +30,29 @@ local Options = Library.Options
 --// State Variables \\--
 local isRunning = false
 local antiAfkEnabled = true
+local autoReconnectEnabled = true
+local autoSaveEnabled = true
 local walkDistance = 4
 local pauseDuration = 4
+local isInitializingConfig = true
+local hasQueuedTeleport = false
+local isReconnecting = false
 
 --// Window & Tabs \\--
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v1.1",
+	FooterRight = "v1.2",
 	Username = true,
 	Badge = "Idle",
-	Size = UDim2.fromOffset(520, 380),
+	Size = UDim2.fromOffset(550, 420),
 	Center = true,
 	AutoShow = true,
 })
 
 local Tabs = {
 	Mover = Window:AddTab("Auto-Mover", "footprints"),
+	Config = Window:AddTab("Config", "folder-cog"),
 }
 
 --// Left Groupbox: Controls & Configuration \\--
@@ -63,6 +78,12 @@ ControlsBox:AddCheckbox("AntiAFK", {
 	Text = "Anti-AFK (20m Bypass)",
 	Default = true,
 	Tooltip = "Prevents Roblox Error Code 278 (20-minute idle disconnect)",
+})
+
+ControlsBox:AddCheckbox("AutoReconnect", {
+	Text = "Auto-Reconnect & Execute",
+	Default = true,
+	Tooltip = "Automatically rejoins if kicked/disconnected and re-runs this script",
 })
 
 ControlsBox:AddSlider("WalkDistance", {
@@ -192,6 +213,55 @@ local function highlightKey(activeKey)
 	end
 end
 
+--// Config Tab Setup \\--
+SaveManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({ "MenuKeybind", "AutoSaveChanges" })
+SaveManager:SetFolder("AllainAutomation/wasd")
+
+local QuickConfigBox = Tabs.Config:AddGroupbox({
+	Side = "Left",
+	Name = "Quick Config & Autoload",
+	IconName = "zap",
+	Description = "Automatically saves edits to your active autoload config.",
+})
+
+QuickConfigBox:AddCheckbox("AutoSaveChanges", {
+	Text = "Auto-Save Edits to Autoload",
+	Default = true,
+	Tooltip = "Automatically saves any slider/checkbox change to your autoload config (or 'default')",
+})
+
+QuickConfigBox:AddButton("Save & Set 'default' as Autoload", function()
+	local ok, err = SaveManager:Save("default")
+	if not ok then
+		Library:Notify("Failed to save 'default': " .. tostring(err), 3)
+		return
+	end
+	SaveManager:SaveAutoloadConfig("default")
+	if Options.SaveManager_ConfigList then
+		Options.SaveManager_ConfigList:SetValues(SaveManager:RefreshConfigList())
+		Options.SaveManager_ConfigList:SetValue("default")
+	end
+	Library:Notify("Saved 'default' and set as Autoload!", 3)
+end)
+
+SaveManager:BuildConfigSection(Tabs.Config)
+
+local function autoSaveActiveConfig()
+	if isInitializingConfig or not autoSaveEnabled then
+		return
+	end
+	local targetConfig = SaveManager.AutoloadConfig
+	if not targetConfig or targetConfig == "none" or targetConfig == "" then
+		targetConfig = "default"
+	end
+	local saved = SaveManager:Save(targetConfig)
+	if saved and (not SaveManager.AutoloadConfig or SaveManager.AutoloadConfig == "none") then
+		SaveManager:SaveAutoloadConfig(targetConfig)
+	end
+end
+
 --// Anti-AFK (Prevents Roblox 20-Minute Idle Kick / Error 278) \\--
 local function pulseAntiAfk()
 	pcall(function()
@@ -221,13 +291,103 @@ local function setInternalIdledConnections(enabled)
 	end
 end
 
--- Disable Roblox's internal idle kick connection immediately if supported
 setInternalIdledConnections(false)
 
--- Fallback hook on LocalPlayer.Idled
 local idledConnection = player.Idled:Connect(function()
 	if antiAfkEnabled and not Library.Unloaded then
 		pulseAntiAfk()
+	end
+end)
+
+--// Auto-Reconnect & Auto-Execute (queue_on_teleport) \\--
+local function getQueueOnTeleport()
+	return queue_on_teleport
+		or (syn and syn.queue_on_teleport)
+		or (fluxus and fluxus.queue_on_teleport)
+		or queueonteleport
+end
+
+local function queueScriptForTeleport()
+	if hasQueuedTeleport or not autoReconnectEnabled or Library.Unloaded then
+		return
+	end
+	local queueFunc = getQueueOnTeleport()
+	if queueFunc then
+		local ok = pcall(function()
+			queueFunc(string.format([[
+if not game:IsLoaded() then
+	game.Loaded:Wait()
+end
+loadstring(game:HttpGet(%q))()
+]], scriptUrl))
+		end)
+		if ok then
+			hasQueuedTeleport = true
+		end
+	end
+end
+
+local teleportConnection = player.OnTeleport:Connect(function()
+	if autoReconnectEnabled and not Library.Unloaded then
+		queueScriptForTeleport()
+	end
+end)
+
+local function triggerReconnect(reason)
+	if isReconnecting or not autoReconnectEnabled or Library.Unloaded then
+		return
+	end
+	isReconnecting = true
+	StatusLabel:SetText("Status: Disconnected — Reconnecting...")
+	Window:SetBadge("Reconnecting")
+
+	queueScriptForTeleport()
+
+	task.spawn(function()
+		local attempt = 0
+		while autoReconnectEnabled and not Library.Unloaded do
+			attempt += 1
+			task.wait(attempt == 1 and 2 or 5)
+			if Library.Unloaded or not autoReconnectEnabled then
+				break
+			end
+
+			queueScriptForTeleport()
+
+			if attempt <= 2 and game.JobId and game.JobId ~= "" then
+				pcall(function()
+					TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+				end)
+			else
+				pcall(function()
+					TeleportService:Teleport(game.PlaceId, player)
+				end)
+			end
+		end
+		isReconnecting = false
+	end)
+end
+
+local errorChangedConnection = GuiService.ErrorMessageChanged:Connect(function(errorMessage)
+	if errorMessage and errorMessage ~= "" then
+		triggerReconnect(errorMessage)
+	end
+end)
+
+local promptOverlayConnection
+task.spawn(function()
+	local ok, promptOverlay = pcall(function()
+		return CoreGui:WaitForChild("RobloxGui", 10):WaitForChild("promptOverlay", 10)
+	end)
+	if ok and promptOverlay then
+		if promptOverlay:FindFirstChild("ErrorPrompt") then
+			triggerReconnect("ErrorPrompt")
+		end
+		promptOverlayConnection = promptOverlay.ChildAdded:Connect(function(child)
+			if child.Name == "ErrorPrompt" then
+				triggerReconnect("ErrorPrompt")
+			end
+		end)
 	end
 end)
 
@@ -328,26 +488,65 @@ Toggles.AutoWASD:OnChanged(function(Value)
 	if not Value then
 		highlightKey(nil)
 	end
+	autoSaveActiveConfig()
 end)
 
 Toggles.AntiAFK:OnChanged(function(Value)
 	antiAfkEnabled = Value
 	setInternalIdledConnections(not Value)
+	autoSaveActiveConfig()
+end)
+
+Toggles.AutoReconnect:OnChanged(function(Value)
+	autoReconnectEnabled = Value
+	if Value then
+		queueScriptForTeleport()
+	end
+	autoSaveActiveConfig()
+end)
+
+Toggles.AutoSaveChanges:OnChanged(function(Value)
+	autoSaveEnabled = Value
 end)
 
 Options.WalkDistance:OnChanged(function(Value)
 	walkDistance = Value
+	autoSaveActiveConfig()
 end)
 
 Options.PauseDuration:OnChanged(function(Value)
 	pauseDuration = Value
+	autoSaveActiveConfig()
+end)
+
+Options.AutoWASDKey:OnChanged(function()
+	autoSaveActiveConfig()
+end)
+
+--// Load Autoload Config on Startup \\--
+SaveManager:LoadAutoloadConfig()
+if autoReconnectEnabled then
+	queueScriptForTeleport()
+end
+task.delay(0.5, function()
+	isInitializingConfig = false
 end)
 
 Library:OnUnload(function()
 	isRunning = false
 	antiAfkEnabled = false
+	autoReconnectEnabled = false
 	if idledConnection then
 		idledConnection:Disconnect()
+	end
+	if teleportConnection then
+		teleportConnection:Disconnect()
+	end
+	if errorChangedConnection then
+		errorChangedConnection:Disconnect()
+	end
+	if promptOverlayConnection then
+		promptOverlayConnection:Disconnect()
 	end
 	setInternalIdledConnections(true)
 	for _, dir in ipairs(directions) do
