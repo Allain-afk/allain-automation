@@ -138,6 +138,40 @@ for _, r in ipairs(petRarityList) do
 	knownPetRarities[r:lower()] = r
 end
 
+local eggEspEnabled = false
+local eggEspColorByRarity = true
+local eggEspColor = Color3.fromRGB(255, 215, 80)
+local eggMinLuck = 100
+local eggEspMaxDistance = 600
+local eggRaritySelected = {}
+for _, r in ipairs(petRarityList) do
+	eggRaritySelected[r] = true
+end
+
+local guardEspEnabled = false
+local guardWarnEnabled = true
+local guardWarnDistance = 45
+
+local rarePetAlertEnabled = true
+local rarePetSoundEnabled = true
+local rarePetWebhookEnabled = true
+local rarePetMinCashM = 0
+local defaultRareAlertTiers = {
+	"Divine",
+	"Cosmic",
+	"Secret",
+	"Celestial",
+	"Inferno",
+	"Void",
+	"Omega",
+	"Spectral",
+	"Ethereal",
+}
+local rarePetAlertSelected = {}
+for _, r in ipairs(defaultRareAlertTiers) do
+	rarePetAlertSelected[r] = true
+end
+
 local anchorPosition = nil
 local sessionStartTime = os.clock()
 local completedCycles = 0
@@ -150,7 +184,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v2.5",
+	FooterRight = "v2.6",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
@@ -355,6 +389,11 @@ local DriftLabel = DashboardBox:AddLabel("DriftLabel", {
 	DoesWrap = false,
 })
 
+local BestGroundPetLabel = DashboardBox:AddLabel("BestGroundPetLabel", {
+	Text = "Best Ground Pet: None",
+	DoesWrap = true,
+})
+
 --============================================================================--
 --// Tab 2: Visuals (Player ESP)
 --============================================================================--
@@ -480,6 +519,109 @@ PetEspBox:AddSlider("PetEspMaxDistance", {
 	Suffix = " studs",
 })
 
+local TopPetsRadarBox = Tabs.Visuals:AddGroupbox({
+	Side = "Right",
+	Name = "Live Top-Pets Radar",
+	IconName = "radar",
+	Description = "Highest Cash/s pets currently on the ground across the server.",
+})
+
+local TopPet1Label = TopPetsRadarBox:AddLabel("TopPet1Label", {
+	Text = "#1: Scanning workspace...",
+	DoesWrap = true,
+})
+
+local TopPet2Label = TopPetsRadarBox:AddLabel("TopPet2Label", {
+	Text = "#2: --",
+	DoesWrap = true,
+})
+
+local TopPet3Label = TopPetsRadarBox:AddLabel("TopPet3Label", {
+	Text = "#3: --",
+	DoesWrap = true,
+})
+
+local EggGuardEspBox = Tabs.Visuals:AddGroupbox({
+	Side = "Right",
+	Name = "Egg & Guard ESP",
+	IconName = "shield-alert",
+	Description = "Filter high-luck eggs and track roaming/chasing zone guards.",
+})
+
+EggGuardEspBox:AddCheckbox("EggEspEnabled", {
+	Text = "Enable Egg ESP",
+	Default = false,
+	Tooltip = "Highlights unbroken eggs that meet your minimum Luck multiplier & rarity filter",
+})
+	:AddKeyPicker("EggEspKey", {
+		Default = "G",
+		Mode = "Toggle",
+		SyncToggleState = true,
+		Text = "Egg ESP",
+	})
+	:AddColorPicker("EggEspColor", {
+		Default = eggEspColor,
+		Title = "Egg ESP Color",
+	})
+
+EggGuardEspBox:AddCheckbox("EggEspColorByRarity", {
+	Text = "Color Eggs by Rarity",
+	Default = true,
+	Tooltip = "Colors each egg's highlight and overhead tag using its rarity tier",
+})
+
+EggGuardEspBox:AddSlider("EggMinLuck", {
+	Text = "Egg Min Luck Filter",
+	Default = eggMinLuck,
+	Min = 0,
+	Max = 2000,
+	Rounding = 0,
+	Suffix = "x Luck",
+	Tooltip = "Only highlights eggs with Luck multiplier >= this value (0x = show all)",
+})
+
+EggGuardEspBox:AddDropdown("EggRarityFilter", {
+	Text = "Egg Rarity Filter",
+	Values = petRarityList,
+	Multi = true,
+	Searchable = true,
+	MaxVisibleDropdownItems = 10,
+	Default = petRarityList,
+	Tooltip = "Only unbroken eggs with the selected rarities will be shown",
+})
+
+EggGuardEspBox:AddSlider("EggEspMaxDistance", {
+	Text = "Egg Max Distance",
+	Default = eggEspMaxDistance,
+	Min = 50,
+	Max = 2500,
+	Rounding = 0,
+	Suffix = " studs",
+})
+
+EggGuardEspBox:AddDivider()
+
+EggGuardEspBox:AddCheckbox("GuardEspEnabled", {
+	Text = "Enable Zone Guard / Boss ESP",
+	Default = false,
+	Tooltip = "Tracks zone guards (like IceYeti) through walls with state (Roaming vs Chasing) and distance",
+})
+
+EggGuardEspBox:AddCheckbox("GuardWarnEnabled", {
+	Text = "Guard Proximity Warning",
+	Default = true,
+	Tooltip = "Alerts you with a notification and sound when a zone guard gets close or starts chasing",
+})
+
+EggGuardEspBox:AddSlider("GuardWarnDistance", {
+	Text = "Guard Warning Distance",
+	Default = guardWarnDistance,
+	Min = 15,
+	Max = 150,
+	Rounding = 0,
+	Suffix = " studs",
+})
+
 local EspStyleBox = Tabs.Visuals:AddGroupbox({
 	Side = "Right",
 	Name = "ESP Appearance",
@@ -522,7 +664,7 @@ EspStyleBox:AddSlider("EspOutlineTrans", {
 })
 
 --============================================================================--
---// Tab 3: AFK & Alerts (CPU/GPU Saver + Discord Webhook)
+--// Tab 3: AFK & Alerts (CPU/GPU Saver + Rare Pet Alerts + Discord Webhook)
 --============================================================================--
 
 local PowerBox = Tabs.Utilities:AddGroupbox({
@@ -550,6 +692,51 @@ PowerBox:AddSlider("AfkFpsCap", {
 	Max = 60,
 	Rounding = 0,
 	Suffix = " FPS",
+})
+
+local RareAlertBox = Tabs.Utilities:AddGroupbox({
+	Side = "Left",
+	Name = "Rare Pet Spawn Alerts",
+	IconName = "sparkles",
+	Description = "Instant sound & Discord alert when a high-tier pet hatches.",
+})
+
+RareAlertBox:AddCheckbox("RarePetAlertEnabled", {
+	Text = "Enable Rare Pet Spawn Alert",
+	Default = true,
+	Tooltip = "Watches workspace.AnimalPickups and alerts you as soon as a matching pet spawns",
+})
+
+RareAlertBox:AddCheckbox("RarePetSoundEnabled", {
+	Text = "Play Chime Sound on Spawn",
+	Default = true,
+	Tooltip = "Plays a client-side notification sound when a rare pet spawns",
+})
+
+RareAlertBox:AddCheckbox("RarePetWebhookEnabled", {
+	Text = "Send Instant Discord Ping",
+	Default = true,
+	Tooltip = "Posts a rich Discord embed with Pet Name, Rarity, Weight, Cash/s, and Timer",
+})
+
+RareAlertBox:AddDropdown("RarePetAlertRarities", {
+	Text = "Alert Rarity Tiers",
+	Values = petRarityList,
+	Multi = true,
+	Searchable = true,
+	MaxVisibleDropdownItems = 10,
+	Default = defaultRareAlertTiers,
+	Tooltip = "Select which rarities trigger a Rare Pet Spawn Alert",
+})
+
+RareAlertBox:AddSlider("RarePetMinCashM", {
+	Text = "Min Cash/s Filter",
+	Default = rarePetMinCashM,
+	Min = 0,
+	Max = 500,
+	Rounding = 0,
+	Suffix = "M/s",
+	Tooltip = "Only alert if the pet generates at least this many Million/s (0M/s = any Cash/s)",
 })
 
 local WebhookBox = Tabs.Utilities:AddGroupbox({
@@ -1761,14 +1948,616 @@ local function updateAllPetEsp()
 	end
 end
 
+--============================================================================--
+--// Egg ESP, Zone Guard ESP & Warning, Top-Pets Radar & Rare Spawn Alerts
+--============================================================================--
+
+local eggEspObjects = {}
+local guardEspObjects = {}
+local guardLastWarnTime = {}
+local alertedPetKeys = {}
+local petFirstSeenAt = setmetatable({}, { __mode = "k" })
+
+local rarityRank = {}
+for idx, rName in ipairs(petRarityList) do
+	rarityRank[rName:lower()] = idx
+end
+
+local rarityHexColors = {
+	common = 0xBEBEC3,
+	uncommon = 0x5FDC6E,
+	rare = 0x4BAAFF,
+	epic = 0xBE69FF,
+	legendary = 0xFFCD37,
+	mythic = 0xFF4B6E,
+	mythical = 0xFF4B6E,
+	divine = 0x37F0FF,
+	cosmic = 0xF05AFF,
+	secret = 0xFF3CB4,
+	celestial = 0xFFEB82,
+	inferno = 0xFF5F23,
+	void = 0x9146FF,
+	omega = 0xFF2D2D,
+	spectral = 0x78FFD2,
+	ethereal = 0xD7F5FF,
+}
+
+local function isRaritySelectedInTable(rarityStr, selectionTable)
+	if typeof(rarityStr) ~= "string" or rarityStr == "" then
+		return false
+	end
+	local lower = rarityStr:lower()
+	for selectedKey, isSelected in pairs(selectionTable) do
+		if isSelected and typeof(selectedKey) == "string" then
+			local selLower = selectedKey:lower()
+			if selLower == lower or (selLower == "mythic" and lower == "mythical") or (selLower == "mythical" and lower == "mythic") then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function playClientAlertSound(soundId, volume, pitch)
+	pcall(function()
+		local s = Instance.new("Sound")
+		s.SoundId = soundId or "rbxassetid://4590657391"
+		s.Volume = volume or 1.5
+		s.PlaybackSpeed = pitch or 1
+		s.Parent = espContainer
+		s:Play()
+		task.delay(4, function()
+			if s and s.Parent then
+				s:Destroy()
+			end
+		end)
+	end)
+end
+
+--// 1. Egg ESP Manager \\--
+local function getEggDisplayColor(rarityStr)
+	if eggEspColorByRarity and typeof(rarityStr) == "string" and rarityStr ~= "" then
+		local c = rarityColors[rarityStr:lower()]
+		if c then
+			return c
+		end
+	end
+	return eggEspColor
+end
+
+local function removeEggEsp(eggPart)
+	local entry = eggEspObjects[eggPart]
+	if entry then
+		pcall(function()
+			if entry.Highlight then
+				entry.Highlight:Destroy()
+			end
+			if entry.Billboard then
+				entry.Billboard:Destroy()
+			end
+		end)
+		eggEspObjects[eggPart] = nil
+	end
+end
+
+local function createOrGetEggEsp(eggPart)
+	local entry = eggEspObjects[eggPart]
+	if entry then
+		return entry
+	end
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "EGG_HL"
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Enabled = false
+	highlight.Parent = espContainer
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "EGG_BB"
+	billboard.AlwaysOnTop = true
+	billboard.Size = UDim2.fromOffset(260, 52)
+	billboard.StudsOffset = Vector3.new(0, 4.5, 0)
+	billboard.ResetOnSpawn = false
+	billboard.Enabled = false
+	billboard.Parent = espContainer
+
+	local textLabel = Instance.new("TextLabel")
+	textLabel.Name = "EggInfoLabel"
+	textLabel.Size = UDim2.fromScale(1, 1)
+	textLabel.BackgroundTransparency = 1
+	textLabel.FontFace = Library.Scheme.Font or Font.fromEnum(Enum.Font.GothamBold)
+	textLabel.TextSize = espTextSize
+	textLabel.TextColor3 = eggEspColor
+	textLabel.TextStrokeTransparency = 0.2
+	textLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+	textLabel.TextYAlignment = Enum.TextYAlignment.Bottom
+	textLabel.Text = ""
+	textLabel.Parent = billboard
+
+	entry = {
+		Highlight = highlight,
+		Billboard = billboard,
+		Label = textLabel,
+	}
+	eggEspObjects[eggPart] = entry
+	return entry
+end
+
+local function collectAllEggParts()
+	local list = {}
+	local build = workspace:FindFirstChild("Build")
+	local zoneBuilds = build and build:FindFirstChild("ZoneBuilds")
+	if zoneBuilds then
+		for _, zoneFolder in ipairs(zoneBuilds:GetChildren()) do
+			local eggsFolder = zoneFolder:FindFirstChild("Eggs")
+			if eggsFolder then
+				for _, eggContainer in ipairs(eggsFolder:GetChildren()) do
+					local eggPart = eggContainer:FindFirstChild("Egg")
+					if eggPart and eggPart:IsA("BasePart") then
+						table.insert(list, eggPart)
+					elseif eggContainer:IsA("BasePart") and eggContainer:GetAttribute("EggInfoName") then
+						table.insert(list, eggContainer)
+					end
+				end
+			end
+		end
+	end
+	local topEggs = workspace:FindFirstChild("Eggs")
+	if topEggs then
+		for _, child in ipairs(topEggs:GetChildren()) do
+			local eggPart = child:IsA("BasePart") and child or child:FindFirstChild("Egg")
+			if eggPart and eggPart:IsA("BasePart") then
+				table.insert(list, eggPart)
+			end
+		end
+	end
+	return list
+end
+
+local function updateAllEggEsp()
+	if not eggEspEnabled or Library.Unloaded then
+		for _, entry in pairs(eggEspObjects) do
+			if entry.Highlight then
+				entry.Highlight.Enabled = false
+			end
+			if entry.Billboard then
+				entry.Billboard.Enabled = false
+			end
+		end
+		return
+	end
+
+	local eggParts = collectAllEggParts()
+	local validSet = {}
+	for _, ep in ipairs(eggParts) do
+		validSet[ep] = true
+	end
+	for ep in pairs(eggEspObjects) do
+		if not ep.Parent or not validSet[ep] then
+			removeEggEsp(ep)
+		end
+	end
+
+	local myChar = player.Character
+	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+
+	for _, eggPart in ipairs(eggParts) do
+		local isBroken = eggPart:GetAttribute("Broken") == true
+		local hp = tonumber(eggPart:GetAttribute("Health"))
+		if not isBroken and (not hp or hp > 0) then
+			local dist = myRoot and (eggPart.Position - myRoot.Position).Magnitude or 0
+			local eggName = eggPart:GetAttribute("EggInfoName") or eggPart:GetAttribute("EggType") or "Egg"
+			local eggRarity = tostring(eggPart:GetAttribute("EggInfoRarity") or "")
+			local luckAttr = tostring(eggPart:GetAttribute("EggInfoLuck") or "")
+			local weightKg = tonumber(eggPart:GetAttribute("WeightKg"))
+			local mutationStr = nil
+
+			local overhead = eggPart:FindFirstChild("EggOverhead")
+			local infoUi = overhead and overhead:FindFirstChild("EggInfoUi")
+			if infoUi then
+				if luckAttr == "" then
+					local luckLbl = infoUi:FindFirstChild("LuckMulti")
+					if luckLbl and luckLbl:IsA("TextLabel") then
+						luckAttr = luckLbl.Text
+					end
+				end
+				if eggRarity == "" then
+					local rarLbl = infoUi:FindFirstChild("Rarity")
+					if rarLbl and rarLbl:IsA("TextLabel") then
+						eggRarity = rarLbl.Text
+					end
+				end
+				local mutLbl = infoUi:FindFirstChild("Mutation")
+				if mutLbl and mutLbl:IsA("TextLabel") and mutLbl.Visible and mutLbl.Text ~= "" then
+					mutationStr = mutLbl.Text:gsub("<[^>]+>", ""):match("^%s*(.-)%s*$")
+				end
+			end
+
+			local luckNum = tonumber(luckAttr:match("([%d%.]+)")) or 0
+			local rarityAllowed = (eggRarity == "") or isRaritySelectedInTable(eggRarity, eggRaritySelected)
+
+			if dist <= eggEspMaxDistance and luckNum >= eggMinLuck and rarityAllowed then
+				local entry = createOrGetEggEsp(eggPart)
+				local color = getEggDisplayColor(eggRarity)
+
+				entry.Highlight.Adornee = eggPart
+				entry.Highlight.FillColor = color
+				entry.Highlight.OutlineColor = color
+				entry.Highlight.FillTransparency = espFillTrans
+				entry.Highlight.OutlineTransparency = espOutlineTrans
+				entry.Highlight.Enabled = true
+
+				local titleText = tostring(eggName)
+				if mutationStr and mutationStr ~= "" then
+					titleText = string.format("%s [%s]", titleText, mutationStr)
+				end
+				if eggRarity ~= "" then
+					titleText = string.format("%s (%s)", titleText, eggRarity)
+				end
+				titleText = string.format("%s [%dm]", titleText, math.floor(dist + 0.5))
+
+				local subParts = {}
+				if luckNum > 0 then
+					table.insert(subParts, string.format("🍀 x%.1f Luck", luckNum):gsub("%.0 Luck", " Luck"))
+				elseif luckAttr ~= "" then
+					table.insert(subParts, luckAttr)
+				end
+				if hp then
+					table.insert(subParts, formatAbbreviatedNumber(hp) .. " HP")
+				end
+				if weightKg then
+					table.insert(subParts, string.format("%.1f KG", weightKg):gsub("%.0 KG", " KG"))
+				end
+
+				entry.Billboard.Adornee = eggPart
+				entry.Label.TextColor3 = color
+				entry.Label.TextSize = espTextSize
+				entry.Label.Text = titleText .. (#subParts > 0 and ("\n" .. table.concat(subParts, " · ")) or "")
+				entry.Billboard.Enabled = true
+			else
+				local entry = eggEspObjects[eggPart]
+				if entry then
+					entry.Highlight.Enabled = false
+					entry.Billboard.Enabled = false
+				end
+			end
+		else
+			local entry = eggEspObjects[eggPart]
+			if entry then
+				entry.Highlight.Enabled = false
+				entry.Billboard.Enabled = false
+			end
+		end
+	end
+end
+
+--// 2. Zone Guard / Boss ESP & Proximity Warning \\--
+local function removeGuardEsp(guardModel)
+	local entry = guardEspObjects[guardModel]
+	if entry then
+		pcall(function()
+			if entry.Highlight then
+				entry.Highlight:Destroy()
+			end
+			if entry.Billboard then
+				entry.Billboard:Destroy()
+			end
+		end)
+		guardEspObjects[guardModel] = nil
+	end
+end
+
+local function createOrGetGuardEsp(guardModel)
+	local entry = guardEspObjects[guardModel]
+	if entry then
+		return entry
+	end
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "GUARD_HL_" .. tostring(guardModel.Name)
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Enabled = false
+	highlight.Parent = espContainer
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "GUARD_BB_" .. tostring(guardModel.Name)
+	billboard.AlwaysOnTop = true
+	billboard.Size = UDim2.fromOffset(250, 50)
+	billboard.StudsOffset = Vector3.new(0, 5.5, 0)
+	billboard.ResetOnSpawn = false
+	billboard.Enabled = false
+	billboard.Parent = espContainer
+
+	local textLabel = Instance.new("TextLabel")
+	textLabel.Name = "GuardInfoLabel"
+	textLabel.Size = UDim2.fromScale(1, 1)
+	textLabel.BackgroundTransparency = 1
+	textLabel.FontFace = Library.Scheme.Font or Font.fromEnum(Enum.Font.GothamBold)
+	textLabel.TextSize = espTextSize
+	textLabel.TextColor3 = Color3.fromRGB(255, 175, 50)
+	textLabel.TextStrokeTransparency = 0.2
+	textLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+	textLabel.TextYAlignment = Enum.TextYAlignment.Bottom
+	textLabel.Text = ""
+	textLabel.Parent = billboard
+
+	entry = {
+		Highlight = highlight,
+		Billboard = billboard,
+		Label = textLabel,
+	}
+	guardEspObjects[guardModel] = entry
+	return entry
+end
+
+local function collectAllGuardModels()
+	local guards = {}
+	local build = workspace:FindFirstChild("Build")
+	local zoneBuilds = build and build:FindFirstChild("ZoneBuilds")
+	if zoneBuilds then
+		for _, zoneFolder in ipairs(zoneBuilds:GetChildren()) do
+			for _, child in ipairs(zoneFolder:GetChildren()) do
+				if child:IsA("Model") and child.Name ~= "Eggs" then
+					if child:GetAttribute("ChaseState") ~= nil or child:GetAttribute("RigMode") ~= nil or child:FindFirstChild("BodyHitbox") then
+						table.insert(guards, child)
+					end
+				end
+			end
+		end
+	end
+	return guards
+end
+
+local function updateAllGuardEsp()
+	if (not guardEspEnabled and not guardWarnEnabled) or Library.Unloaded then
+		for _, entry in pairs(guardEspObjects) do
+			if entry.Highlight then
+				entry.Highlight.Enabled = false
+			end
+			if entry.Billboard then
+				entry.Billboard.Enabled = false
+			end
+		end
+		return
+	end
+
+	local guards = collectAllGuardModels()
+	local validSet = {}
+	for _, g in ipairs(guards) do
+		validSet[g] = true
+	end
+	for g in pairs(guardEspObjects) do
+		if not g.Parent or not validSet[g] then
+			removeGuardEsp(g)
+		end
+	end
+
+	local myChar = player.Character
+	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+	local now = os.clock()
+
+	for _, guardModel in ipairs(guards) do
+		local rootPart = guardModel:FindFirstChild("Main")
+			or guardModel:FindFirstChild("HumanoidRootPart")
+			or guardModel:FindFirstChild("BodyHitbox")
+			or guardModel.PrimaryPart
+			or guardModel:FindFirstChildWhichIsA("BasePart")
+
+		if rootPart and rootPart:IsA("BasePart") then
+			local dist = myRoot and (rootPart.Position - myRoot.Position).Magnitude or 9999
+			local chaseState = tostring(guardModel:GetAttribute("ChaseState") or "Roaming")
+			local zoneId = tostring(guardModel:GetAttribute("ZoneId") or (guardModel.Parent and guardModel.Parent.Name) or "")
+			local isChasing = chaseState:lower() ~= "roaming" and chaseState:lower() ~= "idle"
+			local isDangerClose = dist <= guardWarnDistance or (isChasing and dist <= (guardWarnDistance * 1.6))
+
+			-- Proximity Warning
+			if guardWarnEnabled and isDangerClose then
+				local lastWarn = guardLastWarnTime[guardModel] or 0
+				if (now - lastWarn) >= 8 then
+					guardLastWarnTime[guardModel] = now
+					local cleanGuardName = formatPetModelName(guardModel.Name)
+					Library:Notify(
+						string.format("⚠ Guard Alert: %s is %dm away (%s)!", cleanGuardName, math.floor(dist + 0.5), chaseState),
+						4
+					)
+					playClientAlertSound("rbxassetid://4590662766", 1.4, 1.05)
+				end
+			end
+
+			-- Visual Guard ESP
+			if guardEspEnabled and dist <= espMaxDistance then
+				local entry = createOrGetGuardEsp(guardModel)
+				local color = (isChasing or isDangerClose) and Color3.fromRGB(255, 65, 65) or Color3.fromRGB(255, 180, 55)
+
+				entry.Highlight.Adornee = guardModel
+				entry.Highlight.FillColor = color
+				entry.Highlight.OutlineColor = color
+				entry.Highlight.FillTransparency = espFillTrans
+				entry.Highlight.OutlineTransparency = espOutlineTrans
+				entry.Highlight.Enabled = true
+
+				local cleanGuardName = formatPetModelName(guardModel.Name)
+				local line1 = string.format("⚠ %s%s [%dm]", cleanGuardName, zoneId ~= "" and (" (" .. zoneId .. ")") or "", math.floor(dist + 0.5))
+				local line2 = string.format("State: %s", chaseState)
+
+				entry.Billboard.Adornee = rootPart
+				entry.Label.TextColor3 = color
+				entry.Label.TextSize = espTextSize
+				entry.Label.Text = line1 .. "\n" .. line2
+				entry.Billboard.Enabled = true
+			else
+				local entry = guardEspObjects[guardModel]
+				if entry then
+					entry.Highlight.Enabled = false
+					entry.Billboard.Enabled = false
+				end
+			end
+		end
+	end
+end
+
+--// 3. Live Top-Pets Radar & Rare Pet Spawn Alert \\--
+local function scanGroundPetsAndAlerts()
+	local pickupsFolder = workspace:FindFirstChild("AnimalPickups")
+	if not pickupsFolder then
+		TopPet1Label:SetText("#1: None on ground")
+		TopPet2Label:SetText("#2: --")
+		TopPet3Label:SetText("#3: --")
+		BestGroundPetLabel:SetText("Best Ground Pet: None")
+		return
+	end
+
+	local myChar = player.Character
+	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+	local now = os.clock()
+	local groundPets = {}
+
+	for _, petModel in ipairs(pickupsFolder:GetChildren()) do
+		if petModel:IsA("Model") or petModel:IsA("BasePart") then
+			local rootPart = petModel:IsA("Model")
+				and (petModel:FindFirstChild("RootPart") or petModel.PrimaryPart or petModel:FindFirstChildWhichIsA("BasePart"))
+				or petModel
+
+			if rootPart and rootPart:IsA("BasePart") then
+				if not petFirstSeenAt[petModel] then
+					petFirstSeenAt[petModel] = now
+				end
+
+				local dist = myRoot and (rootPart.Position - myRoot.Position).Magnitude or 0
+				local rawName = tostring(petModel:GetAttribute("AnimalName") or petModel.Name)
+				local cleanName = formatPetModelName(rawName)
+				local rarityAttr = petModel:GetAttribute("Rarity")
+				local weightKg = tonumber(petModel:GetAttribute("WeightKg"))
+				local weightBracket = tostring(petModel:GetAttribute("WeightBracket") or "")
+				local hatchId = petModel:GetAttribute("HatchId")
+
+				local cpsText, timerText, rarityGuiText, mutationText = extractPetOverheadInfo(petModel, rootPart)
+				local finalRarity = (rarityAttr and tostring(rarityAttr) ~= "" and tostring(rarityAttr)) or rarityGuiText or "Unknown"
+
+				local cpsNum = 0
+				if cpsText and cpsText ~= "" then
+					cpsNum = parseAbbreviatedNumber(cpsText:gsub("/s", "")) or 0
+				end
+
+				local rank = rarityRank[finalRarity:lower()] or 0
+
+				local wStr = weightKg and (string.format("%.1f KG", weightKg):gsub("%.0 KG", " KG")) or nil
+				if wStr and weightBracket ~= "" then
+					wStr = wStr .. " [" .. weightBracket .. "]"
+				end
+
+				table.insert(groundPets, {
+					model = petModel,
+					name = cleanName,
+					mutation = mutationText,
+					rarity = finalRarity,
+					rarityRank = rank,
+					cpsText = cpsText or "$0/s",
+					cpsNum = cpsNum,
+					weightStr = wStr,
+					timerText = timerText,
+					dist = math.floor(dist + 0.5),
+					hatchId = hatchId,
+				})
+
+				-- Check Rare Pet Spawn Alert (wait up to 0.3s if overhead Cash/s text is still loading)
+				local petKey = hatchId and ("id_" .. tostring(hatchId)) or petModel
+				local overheadReady = (cpsText ~= nil and cpsText ~= "") or ((now - petFirstSeenAt[petModel]) >= 0.35)
+				if overheadReady and not alertedPetKeys[petKey] then
+					alertedPetKeys[petKey] = true
+
+					if rarePetAlertEnabled and isRaritySelectedInTable(finalRarity, rarePetAlertSelected) then
+						local minCashRequired = (rarePetMinCashM or 0) * 1e6
+						if minCashRequired <= 0 or cpsNum >= minCashRequired then
+							local mutTag = (mutationText and mutationText ~= "") and (" [" .. mutationText .. "]") or ""
+							local alertSummary = string.format(
+								"🌟 Rare Pet: %s%s (%s) — %s%s [%dm]",
+								cleanName,
+								mutTag,
+								finalRarity,
+								cpsText or "N/A",
+								wStr and (" · " .. wStr) or "",
+								math.floor(dist + 0.5)
+							)
+							Library:Notify(alertSummary, 6)
+
+							if rarePetSoundEnabled then
+								playClientAlertSound("rbxassetid://4590657391", 1.8, 1)
+							end
+
+							if rarePetWebhookEnabled then
+								local embedColor = rarityHexColors[finalRarity:lower()] or 0x57F287
+								task.spawn(function()
+									postDiscordEmbed({
+										title = string.format("🌟 Rare Pet Spawned — %s (%s)", cleanName, finalRarity),
+										description = string.format("Spotted on server for **%s**", tostring(player.Name)),
+										color = embedColor,
+										fields = {
+											{ name = "Pet", value = cleanName .. mutTag, inline = true },
+											{ name = "Rarity", value = finalRarity, inline = true },
+											{ name = "Cash/s", value = cpsText or "N/A", inline = true },
+											{ name = "Weight", value = wStr or "N/A", inline = true },
+											{ name = "Despawn Timer", value = timerText or "N/A", inline = true },
+											{ name = "Distance", value = string.format("%dm away", math.floor(dist + 0.5)), inline = true },
+										},
+									})
+								end)
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	table.sort(groundPets, function(a, b)
+		if a.cpsNum ~= b.cpsNum then
+			return a.cpsNum > b.cpsNum
+		end
+		if a.rarityRank ~= b.rarityRank then
+			return a.rarityRank > b.rarityRank
+		end
+		return a.dist < b.dist
+	end)
+
+	local function formatRadarEntry(idx, p)
+		if not p then
+			return string.format("#%d: --", idx)
+		end
+		local mut = (p.mutation and p.mutation ~= "") and (" [" .. p.mutation .. "]") or ""
+		local tmr = (p.timerText and p.timerText ~= "") and (" · ⏱" .. p.timerText) or ""
+		return string.format("#%d: %s%s (%s) — %s%s [%dm]", idx, p.name, mut, p.rarity, p.cpsText, tmr, p.dist)
+	end
+
+	if #groundPets == 0 then
+		TopPet1Label:SetText("#1: No hatched pets on ground")
+		TopPet2Label:SetText("#2: --")
+		TopPet3Label:SetText("#3: --")
+		BestGroundPetLabel:SetText("Best Ground Pet: None")
+	else
+		TopPet1Label:SetText(formatRadarEntry(1, groundPets[1]))
+		TopPet2Label:SetText(formatRadarEntry(2, groundPets[2]))
+		TopPet3Label:SetText(formatRadarEntry(3, groundPets[3]))
+		local best = groundPets[1]
+		BestGroundPetLabel:SetText(string.format("Best Pet: %s (%s) %s [%dm]", best.name, best.rarity, best.cpsText, best.dist))
+	end
+end
+
 task.spawn(function()
 	while not Library.Unloaded do
-		if espEnabled or petEspEnabled then
+		local anyVisualActive = espEnabled or petEspEnabled or eggEspEnabled or guardEspEnabled or guardWarnEnabled
+		if anyVisualActive then
 			if espEnabled then
 				pcall(updateAllEsp)
 			end
 			if petEspEnabled then
 				pcall(updateAllPetEsp)
+			end
+			if eggEspEnabled then
+				pcall(updateAllEggEsp)
+			end
+			if guardEspEnabled or guardWarnEnabled then
+				pcall(updateAllGuardEsp)
 			end
 			task.wait(0.15)
 		else
@@ -1783,6 +2572,7 @@ task.spawn(function()
 	while not Library.Unloaded do
 		local now = os.clock()
 		UptimeLabel:SetText("Uptime: " .. formatDuration(now - sessionStartTime))
+		pcall(scanGroundPetsAndAlerts)
 
 		local pingMs = 0
 		pcall(function()
@@ -2036,11 +2826,99 @@ Options.PetEspMaxDistance:OnChanged(function(Value)
 	autoSaveActiveConfig()
 end)
 
+Toggles.EggEspEnabled:OnChanged(function(Value)
+	eggEspEnabled = Value
+	pcall(updateAllEggEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.EggEspKey:OnChanged(function()
+	autoSaveActiveConfig()
+end)
+
+Options.EggEspColor:OnChanged(function(Value)
+	eggEspColor = Value
+	pcall(updateAllEggEsp)
+	autoSaveActiveConfig()
+end)
+
+Toggles.EggEspColorByRarity:OnChanged(function(Value)
+	eggEspColorByRarity = Value
+	pcall(updateAllEggEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.EggMinLuck:OnChanged(function(Value)
+	eggMinLuck = Value
+	pcall(updateAllEggEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.EggRarityFilter:OnChanged(function(Value)
+	if typeof(Value) == "table" then
+		eggRaritySelected = Value
+	end
+	pcall(updateAllEggEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.EggEspMaxDistance:OnChanged(function(Value)
+	eggEspMaxDistance = Value
+	pcall(updateAllEggEsp)
+	autoSaveActiveConfig()
+end)
+
+Toggles.GuardEspEnabled:OnChanged(function(Value)
+	guardEspEnabled = Value
+	pcall(updateAllGuardEsp)
+	autoSaveActiveConfig()
+end)
+
+Toggles.GuardWarnEnabled:OnChanged(function(Value)
+	guardWarnEnabled = Value
+	pcall(updateAllGuardEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.GuardWarnDistance:OnChanged(function(Value)
+	guardWarnDistance = Value
+	pcall(updateAllGuardEsp)
+	autoSaveActiveConfig()
+end)
+
+Toggles.RarePetAlertEnabled:OnChanged(function(Value)
+	rarePetAlertEnabled = Value
+	autoSaveActiveConfig()
+end)
+
+Toggles.RarePetSoundEnabled:OnChanged(function(Value)
+	rarePetSoundEnabled = Value
+	autoSaveActiveConfig()
+end)
+
+Toggles.RarePetWebhookEnabled:OnChanged(function(Value)
+	rarePetWebhookEnabled = Value
+	autoSaveActiveConfig()
+end)
+
+Options.RarePetAlertRarities:OnChanged(function(Value)
+	if typeof(Value) == "table" then
+		rarePetAlertSelected = Value
+	end
+	autoSaveActiveConfig()
+end)
+
+Options.RarePetMinCashM:OnChanged(function(Value)
+	rarePetMinCashM = Value
+	autoSaveActiveConfig()
+end)
+
 --// Load Autoload Config on Startup \\--
 SaveManager:LoadAutoloadConfig()
 task.delay(0.6, function()
 	isInitializingConfig = false
 	pcall(collectProgressSnapshot, false)
+	pcall(scanGroundPetsAndAlerts)
 	if shared.__AllainReconnected and webhookNotifyEvents then
 		shared.__AllainReconnected = nil
 		sendEventWebhook(
@@ -2087,6 +2965,8 @@ Library:OnUnload(function()
 	end
 	table.clear(espObjects)
 	table.clear(petEspObjects)
+	table.clear(eggEspObjects)
+	table.clear(guardEspObjects)
 	setInternalIdledConnections(true)
 	for _, dir in ipairs(directions) do
 		sendKeyState(dir.keyCode, false)
