@@ -58,7 +58,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v1.7",
+	FooterRight = "v1.8",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
@@ -468,19 +468,26 @@ local function scanPlayerGuiForPetsAndCandy()
 		return petsText, candyText
 	end
 
-	local mainGui = playerGui:FindFirstChild("MainGUI") or playerGui
-	for _, desc in ipairs(mainGui:GetDescendants()) do
+	-- Scan ALL ScreenGuis in PlayerGui (not just MainGUI!)
+	for _, desc in ipairs(playerGui:GetDescendants()) do
 		if desc:IsA("TextLabel") or desc:IsA("TextButton") then
-			local rawText = (desc.ContentText and desc.ContentText ~= "") and desc.ContentText or (desc.Text or "")
+			local rawText = desc.Text or ""
+			local okContent, contentText = pcall(function()
+				return desc.ContentText
+			end)
+			if okContent and typeof(contentText) == "string" and contentText ~= "" then
+				rawText = contentText
+			end
+
 			local text = rawText:gsub("<[^>]+>", ""):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
 			local pathLower = desc:GetFullName():lower()
 
-			if text ~= "" and #text < 60 then
-				-- Match "Pets: 52/250" anywhere, or "52/250" inside Pets/Inventory frames
+			if text ~= "" and #text < 80 then
+				-- Match "Pets: 52/250" anywhere, or "52/250" inside any Pet/Inventory/Bag UI
 				if not petsText then
 					local cur, max = text:match("[Pp]ets:?%s*(%d+)%s*/%s*(%d+)")
-					if not cur and (pathLower:find("pet") or pathLower:find("inv")) then
-						cur, max = text:match("^(%d+)%s*/%s*(%d+)$")
+					if not cur and (pathLower:find("pet") or pathLower:find("inv") or pathLower:find("bag") or pathLower:find("storage") or pathLower:find("list") or pathLower:find("header") or pathLower:find("count") or pathLower:find("capacity")) then
+						cur, max = text:match("(%d+)%s*/%s*(%d+)")
 					end
 					if cur and max and tonumber(max) and tonumber(max) >= 20 then
 						petsText = string.format("%s/%s in inventory", cur, max)
@@ -651,7 +658,43 @@ local function sendEventWebhook(title, description, colorHex)
 end
 
 WebhookBox:AddButton("Send Test Progress Webhook", function()
+	local stats = collectProgressSnapshot(false)
 	local ok, err = sendProgressWebhook(nil, 0x5865F2, false)
+	if stats.pets == "N/A" then
+		-- Send a focused Pet Path Finder dump so we can see where the 52/250 label lives
+		local petLines = {}
+		local playerGui = player:FindFirstChild("PlayerGui")
+		if playerGui then
+			for _, desc in ipairs(playerGui:GetDescendants()) do
+				if desc:IsA("TextLabel") or desc:IsA("TextButton") then
+					local t = (desc.Text or ""):gsub("%s+", " ")
+					local p = desc:GetFullName():gsub("^Players%.[^%.]+%.PlayerGui%.", "")
+					if t:find("/") or t:lower():find("pet") or p:lower():find("pet") or p:lower():find("inv") then
+						if not p:find("^RobloxGui") and #t < 60 then
+							table.insert(petLines, string.format("[GUI] %s = %q", p, t))
+						end
+					end
+				end
+			end
+		end
+		local backpack = player:FindFirstChild("Backpack")
+		if backpack then
+			table.insert(petLines, string.format("[Backpack] Children count = %d", #backpack:GetChildren()))
+		end
+		local dump = table.concat(petLines, "\n")
+		if #dump > 3800 then
+			dump = dump:sub(1, 3800) .. "\n... (truncated)"
+		end
+		if dump ~= "" then
+			pcall(function()
+				postDiscordEmbed({
+					title = "Pet Path Finder (v1.8)",
+					description = "```text\n" .. dump .. "\n```",
+					color = 0xFEE75C,
+				})
+			end)
+		end
+	end
 	if ok then
 		Library:Notify("Progress report sent to Discord!", 3)
 	else
