@@ -186,9 +186,9 @@ local isReconnecting = false
 
 --// Window & Tabs \\--
 local Window = Library:CreateWindow({
-	Title = "WASD Auto-Mover",
-	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v2.7",
+	Title = "Break and Steal an Egg Keyless - by Allain",
+	Footer = "Allain-afk · Break and Steal an Egg",
+	FooterRight = "v2.8",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
