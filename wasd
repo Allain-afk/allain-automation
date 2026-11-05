@@ -1,3 +1,17 @@
+--// Single-Instance Guard (Prevents multiple GUIs from opening at once) \\--
+local env = (getgenv and getgenv()) or shared
+if env.__AllainWASDLoading then
+	return
+end
+env.__AllainWASDLoading = true
+
+if env.__AllainWASDLibrary then
+	pcall(function()
+		env.__AllainWASDLibrary:Unload()
+	end)
+	env.__AllainWASDLibrary = nil
+end
+
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
@@ -24,7 +38,17 @@ local player = Players.LocalPlayer or Players.PlayerAdded:Wait()
 --// Load Alexandria Library & SaveManager \\--
 local repo = "https://raw.githubusercontent.com/Allain-afk/allain-automation/main/"
 local scriptUrl = repo .. "wasd"
-local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+local okLib, Library = pcall(function()
+	return loadstring(game:HttpGet(repo .. "Library.lua"))()
+end)
+if not okLib or not Library then
+	env.__AllainWASDLoading = false
+	warn("[AutoWASD] Failed to load Alexandria Library.")
+	return
+end
+env.__AllainWASDLibrary = Library
+env.__AllainWASDLoading = false
+
 local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
 
 local Toggles = Library.Toggles
@@ -58,7 +82,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v1.8",
+	FooterRight = "v1.9",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
@@ -754,13 +778,18 @@ local function getQueueOnTeleport()
 end
 
 local function queueScriptForTeleport()
-	if hasQueuedTeleport or not autoReconnectEnabled or Library.Unloaded then
+	if env.__AllainTeleportQueued or hasQueuedTeleport or not autoReconnectEnabled or Library.Unloaded then
 		return
 	end
 	local queueFunc = getQueueOnTeleport()
 	if queueFunc then
 		local ok = pcall(function()
 			queueFunc(string.format([[
+local env = (getgenv and getgenv()) or shared
+if env.__AllainAutoExecFired then
+	return
+end
+env.__AllainAutoExecFired = true
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
@@ -770,6 +799,7 @@ loadstring(game:HttpGet(%q))()
 		end)
 		if ok then
 			hasQueuedTeleport = true
+			env.__AllainTeleportQueued = true
 		end
 	end
 end
@@ -1081,9 +1111,6 @@ end)
 
 Toggles.AutoReconnect:OnChanged(function(Value)
 	autoReconnectEnabled = Value
-	if Value then
-		queueScriptForTeleport()
-	end
 	autoSaveActiveConfig()
 end)
 
@@ -1145,9 +1172,6 @@ end)
 
 --// Load Autoload Config on Startup \\--
 SaveManager:LoadAutoloadConfig()
-if autoReconnectEnabled then
-	queueScriptForTeleport()
-end
 task.delay(0.6, function()
 	isInitializingConfig = false
 	pcall(collectProgressSnapshot, false)
@@ -1162,6 +1186,10 @@ task.delay(0.6, function()
 end)
 
 Library:OnUnload(function()
+	if env.__AllainWASDLibrary == Library then
+		env.__AllainWASDLibrary = nil
+	end
+	env.__AllainWASDLoading = false
 	isRunning = false
 	antiAfkEnabled = false
 	autoReconnectEnabled = false
