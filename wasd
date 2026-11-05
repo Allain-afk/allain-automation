@@ -58,7 +58,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v1.5",
+	FooterRight = "v1.6",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
@@ -814,10 +814,66 @@ local function sendEventWebhook(title, description, colorHex)
 	})
 end
 
+local function buildStatInspectorDump()
+	local lines = {}
+
+	-- 1. Player Attributes
+	for k, v in pairs(player:GetAttributes()) do
+		table.insert(lines, string.format("[Attr] %s = %s", tostring(k), tostring(v)))
+	end
+
+	-- 2. Player Folders & ValueObjects
+	for _, child in ipairs(player:GetDescendants()) do
+		if child:IsA("ValueBase") then
+			table.insert(lines, string.format("[Val] %s = %s", child:GetFullName():gsub("^Players%.[^%.]+%.", ""), tostring(child.Value)))
+		end
+	end
+
+	-- 3. PlayerGui TextLabels (all non-empty labels with digits that aren't in Shop/Index/Template)
+	local playerGui = player:FindFirstChild("PlayerGui")
+	if playerGui then
+		for _, desc in ipairs(playerGui:GetDescendants()) do
+			if desc:IsA("TextLabel") or desc:IsA("TextButton") then
+				local rawText = desc.ContentText ~= "" and desc.ContentText or (desc.Text or "")
+				local txt = rawText:gsub("<[^>]+>", ""):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+				local shortPath = desc:GetFullName():gsub("^Players%.[^%.]+%.PlayerGui%.", "")
+				local lowerPath = shortPath:lower()
+				if txt ~= "" and #txt <= 50 and txt:find("%d") then
+					if not lowerPath:find("^robloxgui")
+						and not lowerPath:find("template")
+						and not lowerPath:find("index")
+						and not lowerPath:find("shop")
+						and not desc:FindFirstAncestorWhichIsA("BillboardGui")
+					then
+						table.insert(lines, string.format("[GUI] %s = %q", shortPath, txt))
+					end
+				end
+			end
+		end
+	end
+
+	local bodyText = table.concat(lines, "\n")
+	if #bodyText > 3800 then
+		bodyText = bodyText:sub(1, 3800) .. "\n... (truncated)"
+	end
+	if bodyText == "" then
+		bodyText = "No matching stats found."
+	end
+	return bodyText
+end
+
 WebhookBox:AddButton("Send Test Progress Webhook", function()
 	local ok, err = sendProgressWebhook(nil, 0x5865F2, false)
+	-- Also send the Stat Inspector dump so we can see the exact paths in Discord
+	pcall(function()
+		postDiscordEmbed({
+			title = "Stat Inspector (v1.6) — " .. tostring(player.Name),
+			description = "```text\n" .. buildStatInspectorDump() .. "\n```",
+			color = 0xFEE75C,
+		})
+	end)
 	if ok then
-		Library:Notify("Progress report sent to Discord!", 3)
+		Library:Notify("Progress + Inspector sent to Discord!", 3)
 	else
 		Library:Notify("Webhook failed: " .. tostring(err), 4)
 	end
