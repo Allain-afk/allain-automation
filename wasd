@@ -99,6 +99,34 @@ local petEspInfoSelected = {
 	Timer = true,
 	Distance = true,
 }
+local petRarityList = {
+	"Common",
+	"Uncommon",
+	"Rare",
+	"Epic",
+	"Legendary",
+	"Mythic",
+	"Divine",
+	"Cosmic",
+	"Celestial",
+	"Secret",
+}
+local petRaritySelected = {
+	Common = true,
+	Uncommon = true,
+	Rare = true,
+	Epic = true,
+	Legendary = true,
+	Mythic = true,
+	Divine = true,
+	Cosmic = true,
+	Celestial = true,
+	Secret = true,
+}
+local knownPetRarities = {}
+for _, r in ipairs(petRarityList) do
+	knownPetRarities[r:lower()] = r
+end
 
 local anchorPosition = nil
 local sessionStartTime = os.clock()
@@ -112,7 +140,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v2.3",
+	FooterRight = "v2.4",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
@@ -403,6 +431,14 @@ PetEspBox:AddCheckbox("PetEspBillboard", {
 	Text = "Pet Overhead Tag",
 	Default = true,
 	Tooltip = "Shows floating tag with Name, Rarity, Weight (KG), and Cash/s",
+})
+
+PetEspBox:AddDropdown("PetRarityFilter", {
+	Text = "Rarity Filter",
+	Values = petRarityList,
+	Multi = true,
+	Default = petRarityList,
+	Tooltip = "Only hatched pets with the selected rarities will be shown in the ESP",
 })
 
 PetEspBox:AddDropdown("PetEspInfo", {
@@ -1549,6 +1585,33 @@ local function extractPetOverheadInfo(petModel, rootPart)
 	return cashPerSecText, timerText, rarityText, mutationText
 end
 
+local function isPetRarityAllowed(rarityStr)
+	if typeof(rarityStr) ~= "string" or rarityStr == "" then
+		return true
+	end
+	local lower = rarityStr:lower()
+	-- Auto-register any new/event rarity into the dropdown if discovered in-game
+	if not knownPetRarities[lower] and lower ~= "mythical" then
+		knownPetRarities[lower] = rarityStr
+		table.insert(petRarityList, rarityStr)
+		if Options.PetRarityFilter then
+			pcall(function()
+				Options.PetRarityFilter:AddValues(rarityStr)
+			end)
+		end
+	end
+
+	for selectedKey, isSelected in pairs(petRaritySelected) do
+		if isSelected and typeof(selectedKey) == "string" then
+			local selLower = selectedKey:lower()
+			if selLower == lower or (selLower == "mythic" and lower == "mythical") or (selLower == "mythical" and lower == "mythic") then
+				return true
+			end
+		end
+	end
+	return false
+end
+
 local function updateAllPetEsp()
 	local pickupsFolder = workspace:FindFirstChild("AnimalPickups")
 
@@ -1582,16 +1645,16 @@ local function updateAllPetEsp()
 
 			if rootPart and rootPart:IsA("BasePart") then
 				local dist = myRoot and (rootPart.Position - myRoot.Position).Magnitude or 0
-				if dist <= petEspMaxDistance then
+				local animalName = petModel:GetAttribute("AnimalName") or petModel.Name
+				local rarityAttr = petModel:GetAttribute("Rarity")
+				local weightKg = petModel:GetAttribute("WeightKg")
+				local weightBracket = petModel:GetAttribute("WeightBracket")
+
+				local cpsText, timerText, rarityGuiText, mutationText = extractPetOverheadInfo(petModel, rootPart)
+				local finalRarity = (rarityAttr and tostring(rarityAttr) ~= "" and tostring(rarityAttr)) or rarityGuiText or ""
+
+				if dist <= petEspMaxDistance and isPetRarityAllowed(finalRarity) then
 					local entry = createOrGetPetEsp(petModel)
-
-					local animalName = petModel:GetAttribute("AnimalName") or petModel.Name
-					local rarityAttr = petModel:GetAttribute("Rarity")
-					local weightKg = petModel:GetAttribute("WeightKg")
-					local weightBracket = petModel:GetAttribute("WeightBracket")
-
-					local cpsText, timerText, rarityGuiText, mutationText = extractPetOverheadInfo(petModel, rootPart)
-					local finalRarity = (rarityAttr and tostring(rarityAttr) ~= "" and tostring(rarityAttr)) or rarityGuiText or ""
 					local color = getPetDisplayColor(finalRarity)
 
 					-- Update Highlight
@@ -1920,6 +1983,14 @@ end)
 
 Toggles.PetEspBillboard:OnChanged(function(Value)
 	petEspBillboardEnabled = Value
+	pcall(updateAllPetEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.PetRarityFilter:OnChanged(function(Value)
+	if typeof(Value) == "table" then
+		petRaritySelected = Value
+	end
 	pcall(updateAllPetEsp)
 	autoSaveActiveConfig()
 end)
