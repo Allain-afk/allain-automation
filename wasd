@@ -188,10 +188,10 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "Break and Steal an Egg Keyless - by Allain",
 	Footer = "Allain-afk · Break and Steal an Egg",
-	FooterRight = "v2.8",
+	FooterRight = "v2.9",
 	Username = true,
 	Badge = "Idle",
-	Size = UDim2.fromOffset(580, 460),
+	Size = UDim2.fromOffset(870, 690),
 	Center = true,
 	AutoShow = true,
 })
