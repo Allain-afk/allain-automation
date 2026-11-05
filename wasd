@@ -108,8 +108,13 @@ local petRarityList = {
 	"Mythic",
 	"Divine",
 	"Cosmic",
-	"Celestial",
 	"Secret",
+	"Celestial",
+	"Inferno",
+	"Void",
+	"Omega",
+	"Spectral",
+	"Ethereal",
 }
 local petRaritySelected = {
 	Common = true,
@@ -120,8 +125,13 @@ local petRaritySelected = {
 	Mythic = true,
 	Divine = true,
 	Cosmic = true,
-	Celestial = true,
 	Secret = true,
+	Celestial = true,
+	Inferno = true,
+	Void = true,
+	Omega = true,
+	Spectral = true,
+	Ethereal = true,
 }
 local knownPetRarities = {}
 for _, r in ipairs(petRarityList) do
@@ -140,7 +150,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v2.4",
+	FooterRight = "v2.5",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
@@ -437,9 +447,21 @@ PetEspBox:AddDropdown("PetRarityFilter", {
 	Text = "Rarity Filter",
 	Values = petRarityList,
 	Multi = true,
+	Searchable = true,
+	MaxVisibleDropdownItems = 10,
 	Default = petRarityList,
 	Tooltip = "Only hatched pets with the selected rarities will be shown in the ESP",
 })
+
+PetEspBox:AddButton("Select All Rarities", function()
+	local all = {}
+	for _, r in ipairs(petRarityList) do
+		all[r] = true
+	end
+	Options.PetRarityFilter:SetValue(all)
+end):AddButton("Clear All", function()
+	Options.PetRarityFilter:SetValue({})
+end)
 
 PetEspBox:AddDropdown("PetEspInfo", {
 	Text = "Pet Tag Information",
@@ -1469,8 +1491,13 @@ local rarityColors = {
 	mythical = Color3.fromRGB(255, 75, 110),
 	divine = Color3.fromRGB(55, 240, 255),
 	cosmic = Color3.fromRGB(240, 90, 255),
-	celestial = Color3.fromRGB(255, 235, 130),
 	secret = Color3.fromRGB(255, 60, 180),
+	celestial = Color3.fromRGB(255, 235, 130),
+	inferno = Color3.fromRGB(255, 95, 35),
+	void = Color3.fromRGB(145, 70, 255),
+	omega = Color3.fromRGB(255, 45, 45),
+	spectral = Color3.fromRGB(120, 255, 210),
+	ethereal = Color3.fromRGB(215, 245, 255),
 }
 
 local function getPetDisplayColor(rarityStr)
