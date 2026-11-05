@@ -85,6 +85,21 @@ local espInfoSelected = {
 	Stats = true,
 }
 
+local petEspEnabled = false
+local petEspColorByRarity = true
+local petEspHighlightEnabled = true
+local petEspBillboardEnabled = true
+local petEspColor = Color3.fromRGB(85, 240, 150)
+local petEspMaxDistance = 500
+local petEspInfoSelected = {
+	Name = true,
+	Rarity = true,
+	Weight = true,
+	["Cash/s"] = true,
+	Timer = true,
+	Distance = true,
+}
+
 local anchorPosition = nil
 local sessionStartTime = os.clock()
 local completedCycles = 0
@@ -97,7 +112,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v2.2",
+	FooterRight = "v2.3",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
@@ -347,6 +362,64 @@ EspMainBox:AddDropdown("EspInfo", {
 	Multi = true,
 	Default = { "Name", "Distance", "Stats" },
 	Tooltip = "Select which details appear above each player",
+})
+
+local PetEspBox = Tabs.Visuals:AddGroupbox({
+	Side = "Left",
+	Name = "Hatched Pet ESP",
+	IconName = "egg",
+	Description = "Highlights hatched pets on the ground with Name, Rarity, Weight & Cash/s.",
+})
+
+PetEspBox:AddCheckbox("PetEspEnabled", {
+	Text = "Enable Hatched Pet ESP",
+	Default = false,
+	Tooltip = "Shows hatched pets in workspace.AnimalPickups through walls",
+})
+	:AddKeyPicker("PetEspKey", {
+		Default = "P",
+		Mode = "Toggle",
+		SyncToggleState = true,
+		Text = "Pet ESP",
+	})
+	:AddColorPicker("PetEspColor", {
+		Default = petEspColor,
+		Title = "Pet ESP Color",
+	})
+
+PetEspBox:AddCheckbox("PetEspColorByRarity", {
+	Text = "Color by Rarity",
+	Default = true,
+	Tooltip = "Automatically colors each pet's highlight and tag based on its Rarity (Divine, Cosmic, etc.)",
+})
+
+PetEspBox:AddCheckbox("PetEspHighlight", {
+	Text = "Pet Highlight (Chams)",
+	Default = true,
+	Tooltip = "Outlines and fills hatched pet models through walls",
+})
+
+PetEspBox:AddCheckbox("PetEspBillboard", {
+	Text = "Pet Overhead Tag",
+	Default = true,
+	Tooltip = "Shows floating tag with Name, Rarity, Weight (KG), and Cash/s",
+})
+
+PetEspBox:AddDropdown("PetEspInfo", {
+	Text = "Pet Tag Information",
+	Values = { "Name", "Rarity", "Weight", "Cash/s", "Timer", "Distance" },
+	Multi = true,
+	Default = { "Name", "Rarity", "Weight", "Cash/s", "Timer", "Distance" },
+	Tooltip = "Select which details appear on hatched pets",
+})
+
+PetEspBox:AddSlider("PetEspMaxDistance", {
+	Text = "Pet Max Distance",
+	Default = petEspMaxDistance,
+	Min = 20,
+	Max = 2500,
+	Rounding = 0,
+	Suffix = " studs",
 })
 
 local EspStyleBox = Tabs.Visuals:AddGroupbox({
@@ -829,139 +902,6 @@ WebhookBox:AddButton("Send Test Progress Webhook", function()
 		Library:Notify("Webhook failed: " .. tostring(err), 4)
 	end
 end)
-
-local function sendWorkspacePetSnapshot()
-	local myChar = player.Character
-	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-	local myPos = myRoot and myRoot.Position
-
-	local lines = {}
-
-	local function inspectFolder(folderName, maxItems)
-		local folder = workspace:FindFirstChild(folderName)
-		if not folder then
-			table.insert(lines, string.format("-- %s: NOT FOUND --", folderName))
-			return
-		end
-		local children = folder:GetChildren()
-		table.insert(lines, string.format("=== %s (%d children) ===", folderName, #children))
-
-		-- Sort by distance to player so the closest hatched pet is first!
-		table.sort(children, function(a, b)
-			local posA, posB
-			pcall(function()
-				posA = a:IsA("Model") and a:GetPivot().Position or (a:IsA("BasePart") and a.Position or nil)
-			end)
-			pcall(function()
-				posB = b:IsA("Model") and b:GetPivot().Position or (b:IsA("BasePart") and b.Position or nil)
-			end)
-			local dA = (myPos and posA) and (posA - myPos).Magnitude or 999999
-			local dB = (myPos and posB) and (posB - myPos).Magnitude or 999999
-			return dA < dB
-		end)
-
-		for i = 1, math.min(#children, maxItems) do
-			local item = children[i]
-			local pos = nil
-			pcall(function()
-				pos = item:IsA("Model") and item:GetPivot().Position or (item:IsA("BasePart") and item.Position or nil)
-			end)
-			local dist = (myPos and pos) and math.floor((pos - myPos).Magnitude) or -1
-			table.insert(lines, string.format("\n[%d] %s (%s) [Dist: %dm]", i, item.Name, item.ClassName, dist))
-
-			-- Item Attributes
-			local attrs = item:GetAttributes()
-			if next(attrs) ~= nil then
-				local kv = {}
-				for k, v in pairs(attrs) do
-					table.insert(kv, string.format("%s=%s", tostring(k), tostring(v)))
-				end
-				table.sort(kv)
-				table.insert(lines, "  Attrs: {" .. table.concat(kv, ", ") .. "}")
-			end
-
-			-- Descendant Attributes, TextLabels, ProximityPrompts, and ValueBases
-			for _, desc in ipairs(item:GetDescendants()) do
-				local dAttrs = desc:GetAttributes()
-				if next(dAttrs) ~= nil then
-					local kv = {}
-					for k, v in pairs(dAttrs) do
-						table.insert(kv, string.format("%s=%s", tostring(k), tostring(v)))
-					end
-					table.sort(kv)
-					local relPath = desc:GetFullName():gsub("^Workspace%." .. folderName .. "%.", "")
-					table.insert(lines, string.format("  [SubAttr] %s (%s) -> {%s}", relPath, desc.ClassName, table.concat(kv, ", ")))
-				end
-
-				if desc:IsA("TextLabel") or desc:IsA("TextButton") then
-					local t = (desc.Text or ""):gsub("<[^>]+>", ""):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
-					if t ~= "" then
-						local relPath = desc:GetFullName():gsub("^Workspace%." .. folderName .. "%.", "")
-						table.insert(lines, string.format("  [Text] %s = %q", relPath, t))
-					end
-				elseif desc:IsA("ProximityPrompt") then
-					table.insert(lines, string.format("  [Prompt] %s: Action=%q Object=%q", desc.Name, tostring(desc.ActionText), tostring(desc.ObjectText)))
-				elseif desc:IsA("ValueBase") then
-					table.insert(lines, string.format("  [Val] %s = %s", desc.Name, tostring(desc.Value)))
-				end
-			end
-		end
-	end
-
-	inspectFolder("AnimalPickups", 5)
-	inspectFolder("CarriedAnimals", 3)
-
-	-- Also check PromptAnchors near player in case prompts live in workspace.PromptAnchor
-	local promptLines = {}
-	for _, child in ipairs(workspace:GetChildren()) do
-		if child.Name == "PromptAnchor" and child:IsA("BasePart") then
-			local dist = myPos and math.floor((child.Position - myPos).Magnitude) or 9999
-			if dist <= 120 then
-				local attrs = child:GetAttributes()
-				local kv = {}
-				for k, v in pairs(attrs) do
-					table.insert(kv, string.format("%s=%s", tostring(k), tostring(v)))
-				end
-				for _, sub in ipairs(child:GetDescendants()) do
-					if sub:IsA("ProximityPrompt") then
-						table.insert(kv, string.format("Prompt(%q, %q)", tostring(sub.ActionText), tostring(sub.ObjectText)))
-					end
-					for k, v in pairs(sub:GetAttributes()) do
-						table.insert(kv, string.format("%s.%s=%s", sub.Name, tostring(k), tostring(v)))
-					end
-				end
-				table.insert(promptLines, string.format("[PromptAnchor %dm] {%s}", dist, table.concat(kv, ", ")))
-			end
-		end
-	end
-	if #promptLines > 0 then
-		table.insert(lines, "\n=== Nearby PromptAnchors ===")
-		for _, pl in ipairs(promptLines) do
-			table.insert(lines, pl)
-		end
-	end
-
-	local body = table.concat(lines, "\n")
-	if #body > 3800 then
-		body = body:sub(1, 3800) .. "\n... (truncated)"
-	end
-
-	local ok1, err1 = postDiscordEmbed({
-		title = "AnimalPickups Inspector (v2.2)",
-		description = "```text\n" .. body .. "\n```",
-		color = 0xFEE75C,
-	})
-
-	if ok1 then
-		Library:Notify("AnimalPickups Snapshot sent to Discord!", 3)
-	else
-		Library:Notify("Snapshot failed: " .. tostring(err1), 4)
-	end
-end
-
-WebhookBox:AddButton("Send Pet/Egg Snapshot to Webhook", sendWorkspacePetSnapshot)
-EspMainBox:AddDivider()
-EspMainBox:AddButton("Send Pet/Egg Snapshot to Webhook", sendWorkspacePetSnapshot)
 
 --============================================================================--
 --// Anti-AFK (Prevents Roblox 20-Minute Idle Kick / Error 278)
@@ -1477,10 +1417,269 @@ end
 
 local playerRemovingConn = Players.PlayerRemoving:Connect(removePlayerEsp)
 
+--============================================================================--
+--// Hatched Pet ESP Manager (workspace.AnimalPickups)
+--============================================================================--
+
+local petEspObjects = {}
+
+local rarityColors = {
+	common = Color3.fromRGB(190, 190, 195),
+	uncommon = Color3.fromRGB(95, 220, 110),
+	rare = Color3.fromRGB(75, 170, 255),
+	epic = Color3.fromRGB(190, 105, 255),
+	legendary = Color3.fromRGB(255, 205, 55),
+	mythic = Color3.fromRGB(255, 75, 110),
+	mythical = Color3.fromRGB(255, 75, 110),
+	divine = Color3.fromRGB(55, 240, 255),
+	cosmic = Color3.fromRGB(240, 90, 255),
+	celestial = Color3.fromRGB(255, 235, 130),
+	secret = Color3.fromRGB(255, 60, 180),
+}
+
+local function getPetDisplayColor(rarityStr)
+	if petEspColorByRarity and typeof(rarityStr) == "string" and rarityStr ~= "" then
+		local c = rarityColors[rarityStr:lower()]
+		if c then
+			return c
+		end
+	end
+	return petEspColor
+end
+
+local function formatPetModelName(rawName)
+	if typeof(rawName) ~= "string" or rawName == "" then
+		return "Pet"
+	end
+	-- Insert spaces between camelCase words e.g. "CrystalLizard" -> "Crystal Lizard"
+	return (rawName:gsub("(%l)(%u)", "%1 %2"))
+end
+
+local function removePetEsp(petModel)
+	local entry = petEspObjects[petModel]
+	if entry then
+		pcall(function()
+			if entry.Highlight then
+				entry.Highlight:Destroy()
+			end
+			if entry.Billboard then
+				entry.Billboard:Destroy()
+			end
+		end)
+		petEspObjects[petModel] = nil
+	end
+end
+
+local function createOrGetPetEsp(petModel)
+	local entry = petEspObjects[petModel]
+	if entry then
+		return entry
+	end
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "PET_HL_" .. tostring(petModel.Name)
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Enabled = false
+	highlight.Parent = espContainer
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "PET_BB_" .. tostring(petModel.Name)
+	billboard.AlwaysOnTop = true
+	billboard.Size = UDim2.fromOffset(260, 56)
+	billboard.StudsOffset = Vector3.new(0, 4.2, 0)
+	billboard.ResetOnSpawn = false
+	billboard.Enabled = false
+	billboard.Parent = espContainer
+
+	local textLabel = Instance.new("TextLabel")
+	textLabel.Name = "PetInfoLabel"
+	textLabel.Size = UDim2.fromScale(1, 1)
+	textLabel.BackgroundTransparency = 1
+	textLabel.FontFace = Library.Scheme.Font or Font.fromEnum(Enum.Font.GothamBold)
+	textLabel.TextSize = espTextSize
+	textLabel.TextColor3 = petEspColor
+	textLabel.TextStrokeTransparency = 0.2
+	textLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+	textLabel.TextYAlignment = Enum.TextYAlignment.Bottom
+	textLabel.Text = ""
+	textLabel.Parent = billboard
+
+	entry = {
+		Highlight = highlight,
+		Billboard = billboard,
+		Label = textLabel,
+	}
+	petEspObjects[petModel] = entry
+	return entry
+end
+
+local function extractPetOverheadInfo(petModel, rootPart)
+	local cashPerSecText = nil
+	local timerText = nil
+	local rarityText = nil
+	local mutationText = nil
+
+	local attachment = rootPart and rootPart:FindFirstChild("AnimalOverheadAttachment")
+	local overhead = attachment and attachment:FindFirstChild("AnimalOverhead")
+	if overhead then
+		local cpsFrame = overhead:FindFirstChild("CashPerSecond")
+		local cpsLabel = cpsFrame and (cpsFrame:FindFirstChild("CashPerSecond") or cpsFrame:FindFirstChildWhichIsA("TextLabel"))
+		if cpsLabel and cpsLabel:IsA("TextLabel") and cpsLabel.Text ~= "" then
+			cashPerSecText = cpsLabel.Text:gsub("<[^>]+>", ""):match("^%s*(.-)%s*$")
+		end
+
+		local timerFrame = overhead:FindFirstChild("SelfDestructTimer")
+		local timerLabel = timerFrame and (timerFrame:FindFirstChild("CashPerSecond") or timerFrame:FindFirstChildWhichIsA("TextLabel"))
+		if timerLabel and timerLabel:IsA("TextLabel") and timerLabel.Text ~= "" then
+			timerText = timerLabel.Text:gsub("<[^>]+>", ""):match("^%s*(.-)%s*$")
+		end
+
+		local rarityFrame = overhead:FindFirstChild("Rarity")
+		local rarityLabel = rarityFrame and (rarityFrame:FindFirstChild("RarityLabel") or rarityFrame:FindFirstChildWhichIsA("TextLabel"))
+		if rarityLabel and rarityLabel:IsA("TextLabel") and rarityLabel.Text ~= "" then
+			rarityText = rarityLabel.Text:gsub("<[^>]+>", ""):match("^%s*(.-)%s*$")
+		end
+
+		local mutLabel = overhead:FindFirstChild("Mutation")
+		if mutLabel and mutLabel:IsA("TextLabel") and mutLabel.Visible and mutLabel.Text ~= "" then
+			mutationText = mutLabel.Text:gsub("<[^>]+>", ""):match("^%s*(.-)%s*$")
+		end
+	end
+
+	return cashPerSecText, timerText, rarityText, mutationText
+end
+
+local function updateAllPetEsp()
+	local pickupsFolder = workspace:FindFirstChild("AnimalPickups")
+
+	if not petEspEnabled or Library.Unloaded or not pickupsFolder then
+		for _, entry in pairs(petEspObjects) do
+			if entry.Highlight then
+				entry.Highlight.Enabled = false
+			end
+			if entry.Billboard then
+				entry.Billboard.Enabled = false
+			end
+		end
+		return
+	end
+
+	-- Clean up despawned / picked-up pets
+	for petModel in pairs(petEspObjects) do
+		if not petModel.Parent or petModel.Parent ~= pickupsFolder then
+			removePetEsp(petModel)
+		end
+	end
+
+	local myChar = player.Character
+	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+
+	for _, petModel in ipairs(pickupsFolder:GetChildren()) do
+		if petModel:IsA("Model") or petModel:IsA("BasePart") then
+			local rootPart = petModel:IsA("Model")
+				and (petModel:FindFirstChild("RootPart") or petModel.PrimaryPart or petModel:FindFirstChildWhichIsA("BasePart"))
+				or petModel
+
+			if rootPart and rootPart:IsA("BasePart") then
+				local dist = myRoot and (rootPart.Position - myRoot.Position).Magnitude or 0
+				if dist <= petEspMaxDistance then
+					local entry = createOrGetPetEsp(petModel)
+
+					local animalName = petModel:GetAttribute("AnimalName") or petModel.Name
+					local rarityAttr = petModel:GetAttribute("Rarity")
+					local weightKg = petModel:GetAttribute("WeightKg")
+					local weightBracket = petModel:GetAttribute("WeightBracket")
+
+					local cpsText, timerText, rarityGuiText, mutationText = extractPetOverheadInfo(petModel, rootPart)
+					local finalRarity = (rarityAttr and tostring(rarityAttr) ~= "" and tostring(rarityAttr)) or rarityGuiText or ""
+					local color = getPetDisplayColor(finalRarity)
+
+					-- Update Highlight
+					if petEspHighlightEnabled then
+						entry.Highlight.Adornee = petModel
+						entry.Highlight.FillColor = color
+						entry.Highlight.OutlineColor = color
+						entry.Highlight.FillTransparency = espFillTrans
+						entry.Highlight.OutlineTransparency = espOutlineTrans
+						entry.Highlight.Enabled = true
+					else
+						entry.Highlight.Enabled = false
+					end
+
+					-- Update Overhead Tag
+					if petEspBillboardEnabled then
+						local line1 = {}
+						if petEspInfoSelected.Name then
+							local cleanName = formatPetModelName(tostring(animalName))
+							if mutationText and mutationText ~= "" then
+								cleanName = string.format("%s [%s]", cleanName, mutationText)
+							end
+							table.insert(line1, cleanName)
+						end
+						if petEspInfoSelected.Rarity and finalRarity ~= "" then
+							table.insert(line1, string.format("(%s)", finalRarity))
+						end
+						if petEspInfoSelected.Distance then
+							table.insert(line1, string.format("[%dm]", math.floor(dist + 0.5)))
+						end
+
+						local line2 = {}
+						if petEspInfoSelected["Cash/s"] and cpsText and cpsText ~= "" then
+							table.insert(line2, cpsText)
+						end
+						if petEspInfoSelected.Weight and weightKg ~= nil then
+							local wNum = tonumber(weightKg)
+							local wStr = wNum and string.format("%.1f KG", wNum):gsub("%.0 KG", " KG") or (tostring(weightKg) .. " KG")
+							if weightBracket and tostring(weightBracket) ~= "" then
+								wStr = wStr .. " [" .. tostring(weightBracket) .. "]"
+							end
+							table.insert(line2, wStr)
+						end
+						if petEspInfoSelected.Timer and timerText and timerText ~= "" then
+							table.insert(line2, "⏱ " .. timerText)
+						end
+
+						local lines = {}
+						if #line1 > 0 then
+							table.insert(lines, table.concat(line1, " "))
+						end
+						if #line2 > 0 then
+							table.insert(lines, table.concat(line2, " · "))
+						end
+
+						if #lines > 0 then
+							entry.Billboard.Adornee = rootPart
+							entry.Label.TextColor3 = color
+							entry.Label.TextSize = espTextSize
+							entry.Label.Text = table.concat(lines, "\n")
+							entry.Billboard.Enabled = true
+						else
+							entry.Billboard.Enabled = false
+						end
+					else
+						entry.Billboard.Enabled = false
+					end
+				else
+					local entry = petEspObjects[petModel]
+					if entry then
+						entry.Highlight.Enabled = false
+						entry.Billboard.Enabled = false
+					end
+				end
+			end
+		end
+	end
+end
+
 task.spawn(function()
 	while not Library.Unloaded do
-		if espEnabled then
-			pcall(updateAllEsp)
+		if espEnabled or petEspEnabled then
+			if espEnabled then
+				pcall(updateAllEsp)
+			end
+			if petEspEnabled then
+				pcall(updateAllPetEsp)
+			end
 			task.wait(0.15)
 		else
 			task.wait(0.3)
@@ -1687,6 +1886,55 @@ end)
 Options.EspOutlineTrans:OnChanged(function(Value)
 	espOutlineTrans = Value
 	pcall(updateAllEsp)
+	pcall(updateAllPetEsp)
+	autoSaveActiveConfig()
+end)
+
+Toggles.PetEspEnabled:OnChanged(function(Value)
+	petEspEnabled = Value
+	pcall(updateAllPetEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.PetEspKey:OnChanged(function()
+	autoSaveActiveConfig()
+end)
+
+Options.PetEspColor:OnChanged(function(Value)
+	petEspColor = Value
+	pcall(updateAllPetEsp)
+	autoSaveActiveConfig()
+end)
+
+Toggles.PetEspColorByRarity:OnChanged(function(Value)
+	petEspColorByRarity = Value
+	pcall(updateAllPetEsp)
+	autoSaveActiveConfig()
+end)
+
+Toggles.PetEspHighlight:OnChanged(function(Value)
+	petEspHighlightEnabled = Value
+	pcall(updateAllPetEsp)
+	autoSaveActiveConfig()
+end)
+
+Toggles.PetEspBillboard:OnChanged(function(Value)
+	petEspBillboardEnabled = Value
+	pcall(updateAllPetEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.PetEspInfo:OnChanged(function(Value)
+	if typeof(Value) == "table" then
+		petEspInfoSelected = Value
+	end
+	pcall(updateAllPetEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.PetEspMaxDistance:OnChanged(function(Value)
+	petEspMaxDistance = Value
+	pcall(updateAllPetEsp)
 	autoSaveActiveConfig()
 end)
 
@@ -1740,6 +1988,7 @@ Library:OnUnload(function()
 		end)
 	end
 	table.clear(espObjects)
+	table.clear(petEspObjects)
 	setInternalIdledConnections(true)
 	for _, dir in ipairs(directions) do
 		sendKeyState(dir.keyCode, false)
