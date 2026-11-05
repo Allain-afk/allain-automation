@@ -188,7 +188,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "Break and Steal an Egg Keyless - by Allain",
 	Footer = "Allain-afk · Break and Steal an Egg",
-	FooterRight = "v2.9",
+	FooterRight = "v3.0",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(870, 690),
@@ -270,23 +270,6 @@ ControlsBox:AddSlider("PauseDuration", {
 	Max = 30,
 	Rounding = 1,
 	Suffix = "s",
-})
-
-ControlsBox:AddDivider()
-
-ControlsBox:AddLabel("Menu Keybind"):AddKeyPicker("MenuKeybind", {
-	Default = "RightShift",
-	NoUI = true,
-	Text = "Menu keybind",
-})
-Library.ToggleKeybind = Options.MenuKeybind
-
-ControlsBox:AddButton({
-	Text = "Unload Script",
-	Risky = true,
-	Func = function()
-		Library:Unload()
-	end,
 })
 
 --// Right Side: Live WASD Key Visualizer \\--
@@ -823,6 +806,23 @@ QuickConfigBox:AddButton("Save & Set 'default' as Autoload", function()
 	end
 	Library:Notify("Saved 'default' and set as Autoload!", 3)
 end)
+
+QuickConfigBox:AddDivider()
+
+QuickConfigBox:AddLabel("Menu Keybind"):AddKeyPicker("MenuKeybind", {
+	Default = "RightShift",
+	NoUI = true,
+	Text = "Menu keybind",
+})
+Library.ToggleKeybind = Options.MenuKeybind
+
+QuickConfigBox:AddButton({
+	Text = "Unload Script",
+	Risky = true,
+	Func = function()
+		Library:Unload()
+	end,
+})
 
 SaveManager:BuildConfigSection(Tabs.Config)
 
