@@ -152,10 +152,14 @@ local guardEspEnabled = false
 local guardWarnEnabled = true
 local guardWarnDistance = 45
 
+local petEspMinCashRaw = "0"
+local petEspMinCashValue = 0
+
 local rarePetAlertEnabled = true
 local rarePetSoundEnabled = true
 local rarePetWebhookEnabled = true
-local rarePetMinCashM = 0
+local rarePetMinCashRaw = "0"
+local rarePetMinCashValue = 0
 local defaultRareAlertTiers = {
 	"Divine",
 	"Cosmic",
@@ -184,7 +188,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v2.6",
+	FooterRight = "v2.7",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
@@ -502,6 +506,14 @@ end):AddButton("Clear All", function()
 	Options.PetRarityFilter:SetValue({})
 end)
 
+PetEspBox:AddInput("PetEspMinCash", {
+	Text = "Min Cash/s Filter (e.g. 500M, 10B, 50T)",
+	Default = "0",
+	Placeholder = "0 = Any (or 500M, 10B, 50T, 1Qa)",
+	ClearTextOnFocus = false,
+	Tooltip = "Only show hatched pets in ESP that generate at least this much Cash/s (supports K, M, B, T, Qa, Qi)",
+})
+
 PetEspBox:AddDropdown("PetEspInfo", {
 	Text = "Pet Tag Information",
 	Values = { "Name", "Rarity", "Weight", "Cash/s", "Timer", "Distance" },
@@ -729,14 +741,17 @@ RareAlertBox:AddDropdown("RarePetAlertRarities", {
 	Tooltip = "Select which rarities trigger a Rare Pet Spawn Alert",
 })
 
-RareAlertBox:AddSlider("RarePetMinCashM", {
-	Text = "Min Cash/s Filter",
-	Default = rarePetMinCashM,
-	Min = 0,
-	Max = 500,
-	Rounding = 0,
-	Suffix = "M/s",
-	Tooltip = "Only alert if the pet generates at least this many Million/s (0M/s = any Cash/s)",
+RareAlertBox:AddInput("RarePetMinCash", {
+	Text = "Min Cash/s Filter (e.g. 500M, 10B, 50T)",
+	Default = "0",
+	Placeholder = "0 = Any (or 500M, 10B, 50T, 1Qa)",
+	ClearTextOnFocus = false,
+	Tooltip = "Type any minimum Cash/s threshold using K, M, B, T, Qa, Qi (e.g. 500M, 25B, 50T)",
+})
+
+local RareMinCashStatusLabel = RareAlertBox:AddLabel("RareMinCashStatusLabel", {
+	Text = "Active Min Filter: Any ($0/s)",
+	DoesWrap = false,
 })
 
 local WebhookBox = Tabs.Utilities:AddGroupbox({
@@ -1826,6 +1841,27 @@ local function isPetRarityAllowed(rarityStr)
 	return false
 end
 
+local function parseCashFilterInput(rawStr)
+	if typeof(rawStr) == "number" then
+		return math.max(0, rawStr)
+	end
+	if typeof(rawStr) ~= "string" then
+		return 0
+	end
+	local cleaned = rawStr:gsub("/[sS][eE]?[cC]?", ""):gsub("/[sS]", ""):gsub("%$", ""):gsub(",", ""):gsub("%s+", "")
+	if cleaned == "" or cleaned == "0" then
+		return 0
+	end
+	local parsed = parseAbbreviatedNumber(cleaned)
+	if not parsed or parsed <= 0 then
+		return 0
+	end
+	if not cleaned:find("[A-Za-z]") and parsed < 1e6 then
+		parsed = parsed * 1e6
+	end
+	return parsed
+end
+
 local function updateAllPetEsp()
 	local pickupsFolder = workspace:FindFirstChild("AnimalPickups")
 
@@ -1866,8 +1902,10 @@ local function updateAllPetEsp()
 
 				local cpsText, timerText, rarityGuiText, mutationText = extractPetOverheadInfo(petModel, rootPart)
 				local finalRarity = (rarityAttr and tostring(rarityAttr) ~= "" and tostring(rarityAttr)) or rarityGuiText or ""
+				local cpsNum = (cpsText and cpsText ~= "") and (parseAbbreviatedNumber(cpsText:gsub("/s", "")) or 0) or 0
+				local cashAllowed = (petEspMinCashValue <= 0) or (cpsNum >= petEspMinCashValue)
 
-				if dist <= petEspMaxDistance and isPetRarityAllowed(finalRarity) then
+				if dist <= petEspMaxDistance and isPetRarityAllowed(finalRarity) and cashAllowed then
 					local entry = createOrGetPetEsp(petModel)
 					local color = getPetDisplayColor(finalRarity)
 
@@ -2460,15 +2498,14 @@ local function scanGroundPetsAndAlerts()
 					hatchId = hatchId,
 				})
 
-				-- Check Rare Pet Spawn Alert (wait up to 0.3s if overhead Cash/s text is still loading)
+				-- Check Rare Pet Spawn Alert (wait up to 0.35s if overhead Cash/s text is still loading)
 				local petKey = hatchId and ("id_" .. tostring(hatchId)) or petModel
 				local overheadReady = (cpsText ~= nil and cpsText ~= "") or ((now - petFirstSeenAt[petModel]) >= 0.35)
 				if overheadReady and not alertedPetKeys[petKey] then
 					alertedPetKeys[petKey] = true
 
 					if rarePetAlertEnabled and isRaritySelectedInTable(finalRarity, rarePetAlertSelected) then
-						local minCashRequired = (rarePetMinCashM or 0) * 1e6
-						if minCashRequired <= 0 or cpsNum >= minCashRequired then
+						if rarePetMinCashValue <= 0 or cpsNum >= rarePetMinCashValue then
 							local mutTag = (mutationText and mutationText ~= "") and (" [" .. mutationText .. "]") or ""
 							local alertSummary = string.format(
 								"🌟 Rare Pet: %s%s (%s) — %s%s [%dm]",
@@ -2812,6 +2849,13 @@ Options.PetRarityFilter:OnChanged(function(Value)
 	autoSaveActiveConfig()
 end)
 
+Options.PetEspMinCash:OnChanged(function(Value)
+	petEspMinCashRaw = tostring(Value or "0")
+	petEspMinCashValue = parseCashFilterInput(petEspMinCashRaw)
+	pcall(updateAllPetEsp)
+	autoSaveActiveConfig()
+end)
+
 Options.PetEspInfo:OnChanged(function(Value)
 	if typeof(Value) == "table" then
 		petEspInfoSelected = Value
@@ -2908,8 +2952,14 @@ Options.RarePetAlertRarities:OnChanged(function(Value)
 	autoSaveActiveConfig()
 end)
 
-Options.RarePetMinCashM:OnChanged(function(Value)
-	rarePetMinCashM = Value
+Options.RarePetMinCash:OnChanged(function(Value)
+	rarePetMinCashRaw = tostring(Value or "0")
+	rarePetMinCashValue = parseCashFilterInput(rarePetMinCashRaw)
+	if rarePetMinCashValue > 0 then
+		RareMinCashStatusLabel:SetText("Active Min Filter: $" .. formatAbbreviatedNumber(rarePetMinCashValue) .. "/s")
+	else
+		RareMinCashStatusLabel:SetText("Active Min Filter: Any ($0/s)")
+	end
 	autoSaveActiveConfig()
 end)
 
