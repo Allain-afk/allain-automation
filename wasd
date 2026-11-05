@@ -58,7 +58,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v1.6",
+	FooterRight = "v1.7",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
@@ -459,265 +459,101 @@ local function formatShortDuration(seconds)
 	return string.format("%dm %ds", mins, secs)
 end
 
-local function getLeaderstatValue(statName)
-	local leaderstats = player:FindFirstChild("leaderstats")
-	if not leaderstats then
-		return nil
-	end
-	local exact = leaderstats:FindFirstChild(statName)
-	if exact and exact:IsA("ValueBase") then
-		return exact.Value
-	end
-	local targetLower = statName:lower()
-	for _, child in ipairs(leaderstats:GetChildren()) do
-		if child:IsA("ValueBase") and child.Name:lower() == targetLower then
-			return child.Value
-		end
-	end
-	return nil
-end
-
-local function findExactPlayerStat(exactNames, excludeSubstrings)
-	local function isExcluded(nameLower)
-		if not excludeSubstrings then
-			return false
-		end
-		for _, ex in ipairs(excludeSubstrings) do
-			if nameLower:find(ex, 1, true) then
-				return true
-			end
-		end
-		return false
-	end
-
-	-- 1. Check non-leaderstats ValueObjects on Player (Data / Stats folders)
-	for _, folder in ipairs(player:GetChildren()) do
-		if (folder:IsA("Folder") or folder:IsA("Configuration")) and folder.Name ~= "leaderstats" then
-			for _, child in ipairs(folder:GetDescendants()) do
-				if child:IsA("ValueBase") then
-					local lower = child.Name:lower()
-					if not isExcluded(lower) then
-						for _, target in ipairs(exactNames) do
-							if lower == target then
-								return child.Value
-							end
-						end
-					end
-				end
-			end
-		elseif folder:IsA("ValueBase") then
-			local lower = folder.Name:lower()
-			if not isExcluded(lower) then
-				for _, target in ipairs(exactNames) do
-					if lower == target then
-						return folder.Value
-					end
-				end
-			end
-		end
-	end
-
-	-- 2. Check Player Attributes
-	local attrs = player:GetAttributes()
-	for attrName, attrVal in pairs(attrs) do
-		local lower = attrName:lower()
-		if not isExcluded(lower) then
-			for _, target in ipairs(exactNames) do
-				if lower == target then
-					return attrVal
-				end
-			end
-		end
-	end
-
-	return nil
-end
-
-local function scanPlayerGuiStats()
-	local guiData = {
-		cashText = nil,
-		cashNumeric = -1,
-		rateText = nil,
-		speedText = nil,
-		petsText = nil,
-		candyText = nil,
-	}
+local function scanPlayerGuiForPetsAndCandy()
+	local petsText = nil
+	local candyText = nil
 
 	local playerGui = player:FindFirstChild("PlayerGui")
 	if not playerGui then
-		return guiData
+		return petsText, candyText
 	end
 
-	for _, desc in ipairs(playerGui:GetDescendants()) do
+	local mainGui = playerGui:FindFirstChild("MainGUI") or playerGui
+	for _, desc in ipairs(mainGui:GetDescendants()) do
 		if desc:IsA("TextLabel") or desc:IsA("TextButton") then
-			local rawText = desc.Text or ""
-			-- Strip RichText tags if any (e.g. <font ...>$7Qi</font>)
-			local text = rawText:gsub("<[^>]+>", ""):match("^%s*(.-)%s*$") or ""
-			local fullPathLower = desc:GetFullName():lower()
-
-			-- Ignore Shop, Index, and Billboard labels so we don't pick up item prices
-			local isShopOrPopup = fullPathLower:find("shop")
-				or fullPathLower:find("index")
-				or fullPathLower:find("sell")
-				or fullPathLower:find("prompt")
-				or fullPathLower:find("template")
-				or desc:FindFirstAncestorWhichIsA("BillboardGui") ~= nil
+			local rawText = (desc.ContentText and desc.ContentText ~= "") and desc.ContentText or (desc.Text or "")
+			local text = rawText:gsub("<[^>]+>", ""):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+			local pathLower = desc:GetFullName():lower()
 
 			if text ~= "" and #text < 60 then
-				-- 1. Pet inventory counter: matches "Pets: 52/250" or "52/250"
-				if not guiData.petsText then
-					local petRatio = text:match("[Pp]ets:?%s*(%d+%s*/%s*%d+)")
-					if petRatio then
-						guiData.petsText = petRatio:gsub("%s+", "") .. " in inventory"
+				-- Match "Pets: 52/250" anywhere, or "52/250" inside Pets/Inventory frames
+				if not petsText then
+					local cur, max = text:match("[Pp]ets:?%s*(%d+)%s*/%s*(%d+)")
+					if not cur and (pathLower:find("pet") or pathLower:find("inv")) then
+						cur, max = text:match("^(%d+)%s*/%s*(%d+)$")
+					end
+					if cur and max and tonumber(max) and tonumber(max) >= 20 then
+						petsText = string.format("%s/%s in inventory", cur, max)
 					end
 				end
 
-				-- 2. HUD Cash: matches "$7Qi" (starts with $, NOT +$ popup, not in Shop)
-				if not isShopOrPopup and not text:find("/s") and not text:find("^[%+%-]") then
-					local cleanCash = text:match("^%$(%d+%.?%d*[A-Za-z]*)$") or text:match("^%$([%d,%.]+)$")
-					if cleanCash then
-						local parsed = parseAbbreviatedNumber(cleanCash) or 0
-						if parsed > guiData.cashNumeric then
-							guiData.cashNumeric = parsed
-							guiData.cashText = "$" .. cleanCash
-						end
-					end
-				end
-
-				-- 3. HUD Speed with multiplier: e.g. "26.1T (x400K)"
-				if not guiData.speedText and not isShopOrPopup then
-					local speedWithMult = text:match("^(%d+%.?%d*[A-Za-z]*)%s*%(x%d+%.?%d*[A-Za-z]*%)$")
-					if speedWithMult then
-						guiData.speedText = speedWithMult
-					end
-				end
-
-				-- 4. Candy
-				if not guiData.candyText and not isShopOrPopup then
-					if fullPathLower:find("candy") or fullPathLower:find("candies") then
-						local candyVal = text:match("^(%d+%.?%d*[A-Za-z]*)$")
-						if candyVal then
-							guiData.candyText = candyVal
-						end
+				-- Match Candy if present in GUI
+				if not candyText and (pathLower:find("candy") or pathLower:find("candies")) then
+					local val = text:match("(%d+%.?%d*[A-Za-z]*)")
+					if val then
+						candyText = val
 					end
 				end
 			end
 		end
 	end
 
-	return guiData
+	return petsText, candyText
 end
 
--- Track cash history to calculate exact gain over report window & per-second rate
-local lastCashNumber = nil
-local lastCashTimestamp = os.clock()
+-- Track exact Cash attribute history for 100% accurate session/interval gains
 local lastReportCashNumber = nil
 local lastReportTimestamp = os.clock()
-local smoothedCashPerSec = 0
 
 local function collectProgressSnapshot(isReportReset)
 	local now = os.clock()
-	local guiData = scanPlayerGuiStats()
+	local petsGuiText, candyGuiText = scanPlayerGuiForPetsAndCandy()
 
-	-- 1. Cash (prefer HUD "$7Qi" or exact Cash value, NOT leaderstats["Cash/s"])
-	local rawCash = findExactPlayerStat({ "cash", "money", "coins" }, { "/s", "rate", "per", "sec" })
-	local formattedCash = guiData.cashText
-	if not formattedCash and rawCash ~= nil then
-		if typeof(rawCash) == "number" then
-			formattedCash = "$" .. formatAbbreviatedNumber(rawCash)
-		else
-			local s = tostring(rawCash)
-			formattedCash = s:find("^%$") and s or ("$" .. s)
-		end
-	end
-	formattedCash = formattedCash or "N/A"
-	local currentCashNum = parseAbbreviatedNumber(formattedCash) or parseAbbreviatedNumber(rawCash)
+	-- 1. Exact Cash from Player Attribute: player:GetAttribute("Cash")
+	local rawCash = player:GetAttribute("Cash")
+	local currentCashNum = typeof(rawCash) == "number" and rawCash or parseAbbreviatedNumber(rawCash)
+	local formattedCash = currentCashNum and ("$" .. formatAbbreviatedNumber(currentCashNum)) or "N/A"
 
-	-- 2. Cash/s Rate (read directly from leaderstats["Cash/s"] if present!)
-	local leaderCashPerSec = getLeaderstatValue("Cash/s") or getLeaderstatValue("CashPerSec")
-	local rateStr = nil
-	if leaderCashPerSec ~= nil then
-		local s = typeof(leaderCashPerSec) == "number" and formatAbbreviatedNumber(leaderCashPerSec) or tostring(leaderCashPerSec)
-		s = s:gsub("^%+", ""):gsub("^%$", ""):gsub("/s$", "")
-		rateStr = "+" .. s .. "/s"
-	end
+	-- 2. Exact Cash/s Rate from Player Attribute: player:GetAttribute("CashPerSecond")
+	local rawCashPerSec = player:GetAttribute("CashPerSecond")
+	local cashPerSecNum = typeof(rawCashPerSec) == "number" and rawCashPerSec or parseAbbreviatedNumber(rawCashPerSec)
+	local rateStr = cashPerSecNum and ("+" .. formatAbbreviatedNumber(cashPerSecNum) .. "/s") or nil
 
-	-- Track Cash Gained in session/interval
-	if currentCashNum then
-		if lastCashNumber and (now - lastCashTimestamp) >= 1 then
-			local instantRate = (currentCashNum - lastCashNumber) / (now - lastCashTimestamp)
-			if instantRate >= 0 then
-				smoothedCashPerSec = smoothedCashPerSec == 0 and instantRate or (smoothedCashPerSec * 0.7 + instantRate * 0.3)
-			end
-		end
-		lastCashNumber = currentCashNum
-		lastCashTimestamp = now
-
-		if not lastReportCashNumber then
-			lastReportCashNumber = currentCashNum
-			lastReportTimestamp = now
-		end
-	end
-
-	if not rateStr and smoothedCashPerSec > 0 then
-		rateStr = "+" .. formatAbbreviatedNumber(smoothedCashPerSec) .. "/s"
+	if currentCashNum and not lastReportCashNumber then
+		lastReportCashNumber = currentCashNum
+		lastReportTimestamp = now
 	end
 
 	local cashFieldLines = {
 		rateStr and string.format("%s (%s)", formattedCash, rateStr) or formattedCash,
 	}
 
-	local elapsed = math.max(1, now - lastReportTimestamp)
-	local gained = 0
-	if currentCashNum and lastReportCashNumber and currentCashNum > lastReportCashNumber then
-		gained = currentCashNum - lastReportCashNumber
-	else
-		-- When Cash is abbreviated like "$7Qi", small gains don't change the "7Qi" string immediately,
-		-- so estimate from leaderstats["Cash/s"] * elapsed if raw delta is 0
-		local parsedRate = parseAbbreviatedNumber(leaderCashPerSec)
-		if parsedRate and parsedRate > 0 then
-			gained = parsedRate * elapsed
+	if currentCashNum and lastReportCashNumber then
+		local gained = math.max(0, currentCashNum - lastReportCashNumber)
+		local elapsed = math.max(1, now - lastReportTimestamp)
+		table.insert(cashFieldLines, string.format("+$%s in %s", formatAbbreviatedNumber(gained), formatShortDuration(elapsed)))
+		if isReportReset then
+			lastReportCashNumber = currentCashNum
+			lastReportTimestamp = now
 		end
-	end
-	table.insert(cashFieldLines, string.format("+$%s in %s", formatAbbreviatedNumber(gained), formatShortDuration(elapsed)))
-	if isReportReset and currentCashNum then
-		lastReportCashNumber = currentCashNum
-		lastReportTimestamp = now
 	end
 
-	-- 3. Speed (prefer leaderstats["Speed"] -> "26.1T", or HUD "26.1T (x400K)")
-	local leaderSpeed = getLeaderstatValue("Speed")
-	local speedStr = nil
-	if leaderSpeed ~= nil then
-		speedStr = typeof(leaderSpeed) == "number" and formatAbbreviatedNumber(leaderSpeed) or tostring(leaderSpeed)
-	elseif guiData.speedText then
-		speedStr = guiData.speedText
-	else
-		local rawSpeed = findExactPlayerStat({ "speed" }, { "walk", "attack", "swing" })
-		if rawSpeed ~= nil then
-			speedStr = typeof(rawSpeed) == "number" and formatAbbreviatedNumber(rawSpeed) or tostring(rawSpeed)
-		end
-	end
-	speedStr = speedStr or "N/A"
+	-- 3. Exact Speed from Player Attribute: player:GetAttribute("SpeedPower")
+	local rawSpeed = player:GetAttribute("SpeedPower")
+	local speedNum = typeof(rawSpeed) == "number" and rawSpeed or parseAbbreviatedNumber(rawSpeed)
+	local speedStr = speedNum and formatAbbreviatedNumber(speedNum) or "N/A"
 
-	-- 4. Pets (matches "Pets: 52/250" -> "52/250 in inventory")
-	local petsStr = guiData.petsText
-	if not petsStr then
-		local petsFolder = player:FindFirstChild("Pets") or player:FindFirstChild("Inventory")
-		if petsFolder then
-			petsStr = string.format("%d in inventory", #petsFolder:GetChildren())
-		else
-			petsStr = "N/A"
-		end
-	end
+	-- 4. Pets Inventory Counter ("52/250 in inventory")
+	local petsStr = petsGuiText or "N/A"
 
 	-- 5. Candy
-	local rawCandy = getLeaderstatValue("Candy") or findExactPlayerStat({ "candy", "candies" })
-	local candyStr = guiData.candyText
+	local rawCandy = player:GetAttribute("Candy") or player:GetAttribute("Candies")
+	local candyStr = nil
 	if rawCandy ~= nil then
 		candyStr = typeof(rawCandy) == "number" and formatAbbreviatedNumber(rawCandy) or tostring(rawCandy)
+	else
+		candyStr = candyGuiText or "0"
 	end
-	candyStr = candyStr or "0"
 
 	-- 6. Doing
 	local doingStr = isRunning
@@ -814,66 +650,10 @@ local function sendEventWebhook(title, description, colorHex)
 	})
 end
 
-local function buildStatInspectorDump()
-	local lines = {}
-
-	-- 1. Player Attributes
-	for k, v in pairs(player:GetAttributes()) do
-		table.insert(lines, string.format("[Attr] %s = %s", tostring(k), tostring(v)))
-	end
-
-	-- 2. Player Folders & ValueObjects
-	for _, child in ipairs(player:GetDescendants()) do
-		if child:IsA("ValueBase") then
-			table.insert(lines, string.format("[Val] %s = %s", child:GetFullName():gsub("^Players%.[^%.]+%.", ""), tostring(child.Value)))
-		end
-	end
-
-	-- 3. PlayerGui TextLabels (all non-empty labels with digits that aren't in Shop/Index/Template)
-	local playerGui = player:FindFirstChild("PlayerGui")
-	if playerGui then
-		for _, desc in ipairs(playerGui:GetDescendants()) do
-			if desc:IsA("TextLabel") or desc:IsA("TextButton") then
-				local rawText = desc.ContentText ~= "" and desc.ContentText or (desc.Text or "")
-				local txt = rawText:gsub("<[^>]+>", ""):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
-				local shortPath = desc:GetFullName():gsub("^Players%.[^%.]+%.PlayerGui%.", "")
-				local lowerPath = shortPath:lower()
-				if txt ~= "" and #txt <= 50 and txt:find("%d") then
-					if not lowerPath:find("^robloxgui")
-						and not lowerPath:find("template")
-						and not lowerPath:find("index")
-						and not lowerPath:find("shop")
-						and not desc:FindFirstAncestorWhichIsA("BillboardGui")
-					then
-						table.insert(lines, string.format("[GUI] %s = %q", shortPath, txt))
-					end
-				end
-			end
-		end
-	end
-
-	local bodyText = table.concat(lines, "\n")
-	if #bodyText > 3800 then
-		bodyText = bodyText:sub(1, 3800) .. "\n... (truncated)"
-	end
-	if bodyText == "" then
-		bodyText = "No matching stats found."
-	end
-	return bodyText
-end
-
 WebhookBox:AddButton("Send Test Progress Webhook", function()
 	local ok, err = sendProgressWebhook(nil, 0x5865F2, false)
-	-- Also send the Stat Inspector dump so we can see the exact paths in Discord
-	pcall(function()
-		postDiscordEmbed({
-			title = "Stat Inspector (v1.6) — " .. tostring(player.Name),
-			description = "```text\n" .. buildStatInspectorDump() .. "\n```",
-			color = 0xFEE75C,
-		})
-	end)
 	if ok then
-		Library:Notify("Progress + Inspector sent to Discord!", 3)
+		Library:Notify("Progress report sent to Discord!", 3)
 	else
 		Library:Notify("Webhook failed: " .. tostring(err), 4)
 	end
