@@ -70,6 +70,21 @@ local webhookNotifyEvents = true
 local webhookHeartbeatEnabled = false
 local webhookIntervalMin = 20
 
+local espEnabled = false
+local espHighlightEnabled = true
+local espBillboardEnabled = true
+local espColor = Color3.fromRGB(110, 175, 255)
+local espMaxDistance = 1500
+local espTextSize = 13
+local espFillTrans = 0.65
+local espOutlineTrans = 0.1
+local espInfoSelected = {
+	Name = true,
+	Distance = true,
+	Health = false,
+	Stats = true,
+}
+
 local anchorPosition = nil
 local sessionStartTime = os.clock()
 local completedCycles = 0
@@ -82,7 +97,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "WASD Auto-Mover",
 	Footer = "Allain-afk · auto-mover",
-	FooterRight = "v1.9",
+	FooterRight = "v2.0",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(580, 460),
@@ -92,6 +107,7 @@ local Window = Library:CreateWindow({
 
 local Tabs = {
 	Mover = Window:AddTab("Auto-Mover", "footprints"),
+	Visuals = Window:AddTab("Visuals", "eye"),
 	Utilities = Window:AddTab("AFK & Alerts", "bell"),
 	Config = Window:AddTab("Config", "folder-cog"),
 }
@@ -287,7 +303,95 @@ local DriftLabel = DashboardBox:AddLabel("DriftLabel", {
 })
 
 --============================================================================--
---// Tab 2: AFK & Alerts (CPU/GPU Saver + Discord Webhook)
+--// Tab 2: Visuals (Player ESP)
+--============================================================================--
+
+local EspMainBox = Tabs.Visuals:AddGroupbox({
+	Side = "Left",
+	Name = "Player ESP",
+	IconName = "users",
+	Description = "Client-side player highlights and overhead info tags.",
+})
+
+EspMainBox:AddCheckbox("EspEnabled", {
+	Text = "Enable Player ESP",
+	Default = false,
+	Tooltip = "Shows other players through walls with customizable overhead tags",
+})
+	:AddKeyPicker("EspKey", {
+		Default = "E",
+		Mode = "Toggle",
+		SyncToggleState = true,
+		Text = "Player ESP",
+	})
+	:AddColorPicker("EspColor", {
+		Default = espColor,
+		Title = "ESP Color",
+	})
+
+EspMainBox:AddCheckbox("EspHighlight", {
+	Text = "Player Highlight (Chams)",
+	Default = true,
+	Tooltip = "Renders a through-wall outline and fill on player characters",
+})
+
+EspMainBox:AddCheckbox("EspBillboard", {
+	Text = "Overhead Info Tag",
+	Default = true,
+	Tooltip = "Displays floating text above each player with Name, Distance, Health, and Stats",
+})
+
+EspMainBox:AddDropdown("EspInfo", {
+	Text = "Tag Information",
+	Values = { "Name", "Distance", "Health", "Stats" },
+	Multi = true,
+	Default = { "Name", "Distance", "Stats" },
+	Tooltip = "Select which details appear above each player",
+})
+
+local EspStyleBox = Tabs.Visuals:AddGroupbox({
+	Side = "Right",
+	Name = "ESP Appearance",
+	IconName = "sliders-horizontal",
+	Description = "Customize range, font size, and highlight transparency.",
+})
+
+EspStyleBox:AddSlider("EspMaxDistance", {
+	Text = "Max Distance",
+	Default = espMaxDistance,
+	Min = 50,
+	Max = 5000,
+	Rounding = 0,
+	Suffix = " studs",
+})
+
+EspStyleBox:AddSlider("EspTextSize", {
+	Text = "Tag Text Size",
+	Default = espTextSize,
+	Min = 10,
+	Max = 20,
+	Rounding = 0,
+	Suffix = " px",
+})
+
+EspStyleBox:AddSlider("EspFillTrans", {
+	Text = "Highlight Fill Transparency",
+	Default = espFillTrans,
+	Min = 0,
+	Max = 1,
+	Rounding = 2,
+})
+
+EspStyleBox:AddSlider("EspOutlineTrans", {
+	Text = "Highlight Outline Transparency",
+	Default = espOutlineTrans,
+	Min = 0,
+	Max = 1,
+	Rounding = 2,
+})
+
+--============================================================================--
+--// Tab 3: AFK & Alerts (CPU/GPU Saver + Discord Webhook)
 --============================================================================--
 
 local PowerBox = Tabs.Utilities:AddGroupbox({
@@ -1028,6 +1132,229 @@ local renderSteppedConn = RunService.RenderStepped:Connect(function(dt)
 	end
 end)
 
+--============================================================================--
+--// Client-Side Player ESP Manager (Parented to Protected UI Container)
+--============================================================================--
+
+local espParent = (gethui and gethui()) or CoreGui
+local oldEspFolder = espParent:FindFirstChild("__AllainESPContainer")
+if oldEspFolder then
+	pcall(function()
+		oldEspFolder:Destroy()
+	end)
+end
+
+local espContainer = Instance.new("Folder")
+espContainer.Name = "__AllainESPContainer"
+espContainer.Parent = espParent
+
+local espObjects = {}
+
+local function getTargetPlayerStatSummary(targetPlayer)
+	local cashRate = targetPlayer:GetAttribute("CashPerSecond")
+	local speedVal = targetPlayer:GetAttribute("SpeedPower")
+
+	local ls = targetPlayer:FindFirstChild("leaderstats")
+	if ls then
+		if not cashRate then
+			local cs = ls:FindFirstChild("Cash/s") or ls:FindFirstChild("CashPerSec")
+			if cs and cs:IsA("ValueBase") then
+				cashRate = cs.Value
+			end
+		end
+		if not speedVal then
+			local sp = ls:FindFirstChild("Speed")
+			if sp and sp:IsA("ValueBase") then
+				speedVal = sp.Value
+			end
+		end
+	end
+
+	local parts = {}
+	if cashRate ~= nil then
+		local formattedRate = typeof(cashRate) == "number" and formatAbbreviatedNumber(cashRate) or tostring(cashRate)
+		formattedRate = formattedRate:gsub("^%+", ""):gsub("^%$", ""):gsub("/s$", "")
+		table.insert(parts, "$" .. formattedRate .. "/s")
+	end
+	if speedVal ~= nil then
+		local formattedSpeed = typeof(speedVal) == "number" and formatAbbreviatedNumber(speedVal) or tostring(speedVal)
+		table.insert(parts, formattedSpeed .. " SPD")
+	end
+
+	return table.concat(parts, " · ")
+end
+
+local function removePlayerEsp(targetPlayer)
+	local entry = espObjects[targetPlayer]
+	if entry then
+		pcall(function()
+			if entry.Highlight then
+				entry.Highlight:Destroy()
+			end
+			if entry.Billboard then
+				entry.Billboard:Destroy()
+			end
+		end)
+		espObjects[targetPlayer] = nil
+	end
+end
+
+local function createOrGetPlayerEsp(targetPlayer)
+	local entry = espObjects[targetPlayer]
+	if entry then
+		return entry
+	end
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "ESP_HL_" .. targetPlayer.Name
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Enabled = false
+	highlight.Parent = espContainer
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "ESP_BB_" .. targetPlayer.Name
+	billboard.AlwaysOnTop = true
+	billboard.Size = UDim2.fromOffset(240, 48)
+	billboard.StudsOffset = Vector3.new(0, 3.2, 0)
+	billboard.ResetOnSpawn = false
+	billboard.Enabled = false
+	billboard.Parent = espContainer
+
+	local textLabel = Instance.new("TextLabel")
+	textLabel.Name = "InfoLabel"
+	textLabel.Size = UDim2.fromScale(1, 1)
+	textLabel.BackgroundTransparency = 1
+	textLabel.FontFace = Library.Scheme.Font or Font.fromEnum(Enum.Font.GothamBold)
+	textLabel.TextSize = espTextSize
+	textLabel.TextColor3 = espColor
+	textLabel.TextStrokeTransparency = 0.25
+	textLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+	textLabel.TextYAlignment = Enum.TextYAlignment.Bottom
+	textLabel.Text = ""
+	textLabel.Parent = billboard
+
+	entry = {
+		Highlight = highlight,
+		Billboard = billboard,
+		Label = textLabel,
+	}
+	espObjects[targetPlayer] = entry
+	return entry
+end
+
+local function updateAllEsp()
+	if not espEnabled or Library.Unloaded then
+		for _, entry in pairs(espObjects) do
+			if entry.Highlight then
+				entry.Highlight.Enabled = false
+			end
+			if entry.Billboard then
+				entry.Billboard.Enabled = false
+			end
+		end
+		return
+	end
+
+	local myChar = player.Character
+	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+
+	for _, targetPlayer in ipairs(Players:GetPlayers()) do
+		if targetPlayer ~= player then
+			local char = targetPlayer.Character
+			local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+			local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+			local head = char and (char:FindFirstChild("Head") or rootPart)
+
+			if char and rootPart and head and (not humanoid or humanoid.Health > 0) then
+				local dist = myRoot and (rootPart.Position - myRoot.Position).Magnitude or 0
+				if dist <= espMaxDistance then
+					local entry = createOrGetPlayerEsp(targetPlayer)
+
+					-- Update Highlight
+					if espHighlightEnabled then
+						entry.Highlight.Adornee = char
+						entry.Highlight.FillColor = espColor
+						entry.Highlight.OutlineColor = espColor
+						entry.Highlight.FillTransparency = espFillTrans
+						entry.Highlight.OutlineTransparency = espOutlineTrans
+						entry.Highlight.Enabled = true
+					else
+						entry.Highlight.Enabled = false
+					end
+
+					-- Update Overhead Tag
+					if espBillboardEnabled then
+						local topParts = {}
+						if espInfoSelected.Name then
+							local disp = targetPlayer.DisplayName
+							if disp and disp ~= "" and disp ~= targetPlayer.Name then
+								table.insert(topParts, string.format("%s (@%s)", disp, targetPlayer.Name))
+							else
+								table.insert(topParts, targetPlayer.Name)
+							end
+						end
+						if espInfoSelected.Distance then
+							table.insert(topParts, string.format("[%dm]", math.floor(dist + 0.5)))
+						end
+						if espInfoSelected.Health and humanoid then
+							local hpPct = math.clamp(math.floor((humanoid.Health / math.max(humanoid.MaxHealth, 1)) * 100 + 0.5), 0, 100)
+							table.insert(topParts, string.format("(%d%% HP)", hpPct))
+						end
+
+						local lines = {}
+						if #topParts > 0 then
+							table.insert(lines, table.concat(topParts, " "))
+						end
+						if espInfoSelected.Stats then
+							local statLine = getTargetPlayerStatSummary(targetPlayer)
+							if statLine ~= "" then
+								table.insert(lines, statLine)
+							end
+						end
+
+						if #lines > 0 then
+							entry.Billboard.Adornee = head
+							entry.Label.TextColor3 = espColor
+							entry.Label.TextSize = espTextSize
+							entry.Label.Text = table.concat(lines, "\n")
+							entry.Billboard.Enabled = true
+						else
+							entry.Billboard.Enabled = false
+						end
+					else
+						entry.Billboard.Enabled = false
+					end
+				else
+					local entry = espObjects[targetPlayer]
+					if entry then
+						entry.Highlight.Enabled = false
+						entry.Billboard.Enabled = false
+					end
+				end
+			else
+				local entry = espObjects[targetPlayer]
+				if entry then
+					entry.Highlight.Enabled = false
+					entry.Billboard.Enabled = false
+				end
+			end
+		end
+	end
+end
+
+local playerRemovingConn = Players.PlayerRemoving:Connect(removePlayerEsp)
+
+task.spawn(function()
+	while not Library.Unloaded do
+		if espEnabled then
+			pcall(updateAllEsp)
+			task.wait(0.15)
+		else
+			task.wait(0.3)
+		end
+	end
+end)
+
 task.spawn(function()
 	local lastHeartbeat = os.clock()
 	local lastStatSample = 0
@@ -1170,6 +1497,66 @@ Options.LowPowerKey:OnChanged(function()
 	autoSaveActiveConfig()
 end)
 
+Toggles.EspEnabled:OnChanged(function(Value)
+	espEnabled = Value
+	pcall(updateAllEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.EspKey:OnChanged(function()
+	autoSaveActiveConfig()
+end)
+
+Options.EspColor:OnChanged(function(Value)
+	espColor = Value
+	pcall(updateAllEsp)
+	autoSaveActiveConfig()
+end)
+
+Toggles.EspHighlight:OnChanged(function(Value)
+	espHighlightEnabled = Value
+	pcall(updateAllEsp)
+	autoSaveActiveConfig()
+end)
+
+Toggles.EspBillboard:OnChanged(function(Value)
+	espBillboardEnabled = Value
+	pcall(updateAllEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.EspInfo:OnChanged(function(Value)
+	if typeof(Value) == "table" then
+		espInfoSelected = Value
+	end
+	pcall(updateAllEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.EspMaxDistance:OnChanged(function(Value)
+	espMaxDistance = Value
+	pcall(updateAllEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.EspTextSize:OnChanged(function(Value)
+	espTextSize = Value
+	pcall(updateAllEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.EspFillTrans:OnChanged(function(Value)
+	espFillTrans = Value
+	pcall(updateAllEsp)
+	autoSaveActiveConfig()
+end)
+
+Options.EspOutlineTrans:OnChanged(function(Value)
+	espOutlineTrans = Value
+	pcall(updateAllEsp)
+	autoSaveActiveConfig()
+end)
+
 --// Load Autoload Config on Startup \\--
 SaveManager:LoadAutoloadConfig()
 task.delay(0.6, function()
@@ -1211,6 +1598,15 @@ Library:OnUnload(function()
 	if promptOverlayConnection then
 		promptOverlayConnection:Disconnect()
 	end
+	if playerRemovingConn then
+		playerRemovingConn:Disconnect()
+	end
+	if espContainer then
+		pcall(function()
+			espContainer:Destroy()
+		end)
+	end
+	table.clear(espObjects)
 	setInternalIdledConnections(true)
 	for _, dir in ipairs(directions) do
 		sendKeyState(dir.keyCode, false)
