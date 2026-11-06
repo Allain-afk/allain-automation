@@ -1151,6 +1151,226 @@ WebhookBox:AddButton("Send Test Progress Webhook", function()
 	end
 end)
 
+WebhookBox:AddButton("Scan Automation Data to Webhook", function()
+	Library:Notify("Scanning game data for automation... Sending 4 reports to Discord.", 4)
+	task.spawn(function()
+		local function formatAttrs(inst)
+			local okA, attrs = pcall(function()
+				return inst:GetAttributes()
+			end)
+			if not okA or not attrs or next(attrs) == nil then
+				return ""
+			end
+			local parts = {}
+			for k, v in pairs(attrs) do
+				table.insert(parts, string.format("%s=%s", tostring(k), tostring(v)))
+			end
+			table.sort(parts)
+			return "{" .. table.concat(parts, ", ") .. "}"
+		end
+
+		local function clampBlock(lines, maxChars)
+			local out = table.concat(lines, "\n")
+			if #out > maxChars then
+				out = out:sub(1, maxChars) .. "\n... (truncated)"
+			end
+			if out == "" then
+				out = "(none found)"
+			end
+			return "```text\n" .. out .. "\n```"
+		end
+
+		-- [1/4] Player Attributes & ReplicatedStorage Remotes/Modules
+		local lines1 = { "-- Player Attributes --" }
+		table.insert(lines1, "LocalPlayer Attrs: " .. formatAttrs(player))
+		for _, ch in ipairs(player:GetChildren()) do
+			if ch:IsA("ValueBase") then
+				table.insert(lines1, string.format("[PlayerVal] %s (%s) = %s", ch.Name, ch.ClassName, tostring(ch.Value)))
+			elseif ch.Name ~= "PlayerGui" and ch.Name ~= "PlayerScripts" and ch.Name ~= "Backpack" then
+				table.insert(lines1, string.format("[PlayerChild] %s (%s) %s", ch.Name, ch.ClassName, formatAttrs(ch)))
+				for _, sub in ipairs(ch:GetChildren()) do
+					if sub:IsA("ValueBase") then
+						table.insert(lines1, string.format("  .%s = %s", sub.Name, tostring(sub.Value)))
+					end
+				end
+			end
+		end
+
+		table.insert(lines1, "\n-- ReplicatedStorage Remotes & Key Modules --")
+		local rs = game:GetService("ReplicatedStorage")
+		for _, desc in ipairs(rs:GetDescendants()) do
+			local relPath = desc:GetFullName():gsub("^ReplicatedStorage%.", "")
+			if desc:IsA("RemoteEvent") or desc:IsA("RemoteFunction") or desc:IsA("UnreliableRemoteEvent") or desc:IsA("BindableEvent") then
+				table.insert(lines1, string.format("[%s] %s %s", desc.ClassName, relPath, formatAttrs(desc)))
+			elseif desc:IsA("ModuleScript") then
+				local lower = relPath:lower()
+				if lower:find("pet") or lower:find("animal") or lower:find("pick") or lower:find("weapon") or lower:find("tool") or lower:find("trail") or lower:find("plot") or lower:find("tread") or lower:find("upgrade") or lower:find("shop") or lower:find("item") or lower:find("equip") then
+					table.insert(lines1, string.format("[Module] %s", relPath))
+				end
+			end
+		end
+
+		postDiscordEmbed({
+			title = "[1/4] Automation Scan — Player Attrs & Remotes",
+			description = clampBlock(lines1, 3800),
+			color = 0x5865F2,
+		})
+		task.wait(0.7)
+
+		-- [2/4] Plots, Treadmills & Workspace Prompts
+		local lines2 = { "-- Workspace Plots & Prompts --" }
+		local myRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		local plotsFolder = workspace:FindFirstChild("Plots")
+		local targetPlot = nil
+		local closestDist = math.huge
+
+		if plotsFolder then
+			for _, plot in ipairs(plotsFolder:GetChildren()) do
+				local aStr = formatAttrs(plot)
+				local pPos = plot:IsA("Model") and plot:GetPivot().Position or (plot:IsA("BasePart") and plot.Position) or nil
+				local d = (myRoot and pPos) and math.floor((pPos - myRoot.Position).Magnitude) or -1
+				table.insert(lines2, string.format("[Plot] %s (%s) [Dist: %dm] %s", plot.Name, plot.ClassName, d, aStr))
+
+				local ownerMatch = aStr:lower():find(player.Name:lower()) or aStr:find(tostring(player.UserId))
+				if not ownerMatch then
+					for _, desc in ipairs(plot:GetDescendants()) do
+						if desc:IsA("TextLabel") and desc.Text:lower():find(player.Name:lower()) then
+							ownerMatch = true
+							break
+						end
+					end
+				end
+				if ownerMatch then
+					targetPlot = plot
+					table.insert(lines2, "  --> MATCHED AS YOUR PLOT!")
+				elseif d >= 0 and d < closestDist then
+					closestDist = d
+					if not targetPlot then
+						targetPlot = plot
+					end
+				end
+			end
+
+			if targetPlot then
+				table.insert(lines2, "\n-- Detailed Dump of Plot: " .. targetPlot.Name .. " --")
+				for _, desc in ipairs(targetPlot:GetDescendants()) do
+					local rel = desc:GetFullName():gsub("^Workspace%.Plots%.", "")
+					local aStr = formatAttrs(desc)
+					if aStr ~= "" then
+						table.insert(lines2, string.format("[Attr] %s (%s) -> %s", rel, desc.ClassName, aStr))
+					end
+					if desc:IsA("ProximityPrompt") then
+						table.insert(lines2, string.format("[Prompt] %s -> Action=%q Object=%q Enabled=%s", rel, desc.ActionText, desc.ObjectText, tostring(desc.Enabled)))
+					elseif (desc:IsA("TextLabel") or desc:IsA("TextButton")) and desc.Text ~= "" then
+						local cleanT = desc.Text:gsub("<[^>]+>", ""):gsub("%s+", " ")
+						table.insert(lines2, string.format("[UI:%s] %s = %q", desc.ClassName, rel, cleanT))
+					end
+				end
+			end
+		end
+
+		table.insert(lines2, "\n-- Nearby / Shop Prompts in Workspace --")
+		for _, desc in ipairs(workspace:GetDescendants()) do
+			if desc:IsA("ProximityPrompt") then
+				local full = desc:GetFullName()
+				if not full:find("^Workspace%.Plots%.") then
+					local part = desc.Parent and desc.Parent:IsA("BasePart") and desc.Parent or nil
+					local d = (myRoot and part) and math.floor((part.Position - myRoot.Position).Magnitude) or -1
+					table.insert(lines2, string.format("[WS Prompt %dm] %s -> Action=%q Object=%q %s", d, full:gsub("^Workspace%.", ""), desc.ActionText, desc.ObjectText, desc.Parent and formatAttrs(desc.Parent) or ""))
+				end
+			end
+		end
+
+		postDiscordEmbed({
+			title = "[2/4] Automation Scan — Plot, Treadmill & Prompts",
+			description = clampBlock(lines2, 3800),
+			color = 0xFEE75C,
+		})
+		task.wait(0.7)
+
+		-- [3/4] PlayerGui: Pets / Equip Best / Plot / Treadmill Upgrade UI
+		local lines3 = { "-- PlayerGui: Pets, Equip Best, Plot & Treadmill --" }
+		local playerGui = player:FindFirstChild("PlayerGui")
+		if playerGui then
+			for _, sg in ipairs(playerGui:GetChildren()) do
+				if sg:IsA("ScreenGui") and sg.Name ~= "RobloxGui" and sg.Name ~= "Alexandria" then
+					table.insert(lines3, string.format("[ScreenGui] %s (Enabled=%s)", sg.Name, tostring(sg.Enabled)))
+				end
+			end
+			for _, desc in ipairs(playerGui:GetDescendants()) do
+				local rel = desc:GetFullName():gsub("^Players%.[^%.]+%.PlayerGui%.", "")
+				if not rel:find("^RobloxGui") and not rel:find("^Alexandria") then
+					local low = rel:lower()
+					local txt = (desc:IsA("TextLabel") or desc:IsA("TextButton") or desc:IsA("TextBox")) and (desc.Text or ""):gsub("<[^>]+>", ""):gsub("%s+", " ") or ""
+					local txtLow = txt:lower()
+					local aStr = formatAttrs(desc)
+
+					local isPetOrUpgrade = low:find("equip") or low:find("best") or low:find("pet") or low:find("animal")
+						or low:find("tread") or low:find("thread") or low:find("plot") or low:find("upgrade")
+						or txtLow:find("equip") or txtLow:find("best") or txtLow:find("treadmill") or txtLow:find("upgrade")
+
+					if isPetOrUpgrade then
+						if desc:IsA("TextButton") or desc:IsA("ImageButton") then
+							table.insert(lines3, string.format("[BTN:%s] %s | Text=%q %s", desc.ClassName, rel, txt, aStr))
+						elseif desc:IsA("TextLabel") and txt ~= "" and #txt < 80 then
+							table.insert(lines3, string.format("[LBL] %s = %q %s", rel, txt, aStr))
+						elseif aStr ~= "" then
+							table.insert(lines3, string.format("[UI:%s] %s %s", desc.ClassName, rel, aStr))
+						end
+					end
+				end
+			end
+		end
+
+		postDiscordEmbed({
+			title = "[3/4] Automation Scan — Pet Equip & Upgrade UI",
+			description = clampBlock(lines3, 3800),
+			color = 0x57F287,
+		})
+		task.wait(0.7)
+
+		-- [4/4] PlayerGui: Pickaxe (Diamond Shop) & Trails Shop UI
+		local lines4 = { "-- PlayerGui: Pickaxe / Weapon / Diamond / Trail Shops --" }
+		if playerGui then
+			for _, desc in ipairs(playerGui:GetDescendants()) do
+				local rel = desc:GetFullName():gsub("^Players%.[^%.]+%.PlayerGui%.", "")
+				if not rel:find("^RobloxGui") and not rel:find("^Alexandria") then
+					local low = rel:lower()
+					local txt = (desc:IsA("TextLabel") or desc:IsA("TextButton") or desc:IsA("TextBox")) and (desc.Text or ""):gsub("<[^>]+>", ""):gsub("%s+", " ") or ""
+					local txtLow = txt:lower()
+					local aStr = formatAttrs(desc)
+
+					local isShopRelated = low:find("pick") or low:find("weapon") or low:find("tool") or low:find("hammer") or low:find("bat")
+						or low:find("trail") or low:find("diamond") or low:find("shop") or low:find("store") or low:find("buy")
+						or txtLow:find("pickaxe") or txtLow:find("trail") or txtLow:find("diamond") or txtLow:find("buy")
+
+					if isShopRelated then
+						if desc:IsA("TextButton") or desc:IsA("ImageButton") then
+							table.insert(lines4, string.format("[BTN:%s] %s | Text=%q %s", desc.ClassName, rel, txt, aStr))
+						elseif desc:IsA("TextLabel") and txt ~= "" and #txt < 80 then
+							table.insert(lines4, string.format("[LBL] %s = %q %s", rel, txt, aStr))
+						elseif aStr ~= "" then
+							table.insert(lines4, string.format("[UI:%s] %s %s", desc.ClassName, rel, aStr))
+						end
+					end
+				end
+			end
+		end
+
+		local okFinal, errFinal = postDiscordEmbed({
+			title = "[4/4] Automation Scan — Pickaxe & Trail Shop UI",
+			description = clampBlock(lines4, 3800),
+			color = 0xEB459E,
+		})
+
+		if okFinal then
+			Library:Notify("All 4 Automation Scan embeds sent to Discord!", 4)
+		else
+			Library:Notify("Scan failed: " .. tostring(errFinal), 4)
+		end
+	end)
+end)
+
 --============================================================================--
 --// Anti-AFK (Prevents Roblox 20-Minute Idle Kick / Error 278)
 --============================================================================--
