@@ -460,9 +460,18 @@ do
 
 	--// Zone Auto-Farm (Safe Walking & In-Game Auto Swing)
 	local knownEggList = {
+		"Forest Egg",
+		"Rock Egg",
+		"Swamp Egg",
+		"Bones Egg",
+		"Scorpion Egg",
+		"Cactus Egg",
+		"Yeti Egg",
 		"Frozen Egg",
 		"Frosty Egg",
-		"Yeti Egg",
+		"Rainbow Egg",
+		"Easter Bunny Egg",
+		"Candy Egg",
 		"Bug Egg",
 		"Magma Egg",
 		"Stone Egg",
@@ -479,50 +488,31 @@ do
 	}
 	local function collectAllWorldZones()
 		local zones = { "All Zones" }
-		local seen = { ["All Zones"] = true }
+		local maxZone = 12
 		local build = workspace:FindFirstChild("Build")
 		local zoneBuilds = build and build:FindFirstChild("ZoneBuilds")
-		local found = {}
 
 		if zoneBuilds then
 			for _, child in ipairs(zoneBuilds:GetChildren()) do
-				local name = child.Name
-				if not seen[name] then
-					seen[name] = true
-					table.insert(found, name)
+				local num = tonumber(child.Name:match("(%d+)"))
+				if num and num > maxZone then
+					maxZone = num
 				end
 			end
 		end
 
 		for _, child in ipairs(workspace:GetChildren()) do
 			if (child:IsA("Folder") or child:IsA("Model")) and child.Name:match("^[Zz]one") then
-				if not seen[child.Name] then
-					seen[child.Name] = true
-					table.insert(found, child.Name)
+				local num = tonumber(child.Name:match("(%d+)"))
+				if num and num > maxZone then
+					maxZone = num
 				end
 			end
 		end
 
-		table.sort(found, function(a, b)
-			local numA = tonumber(a:match("(%d+)")) or 9999
-			local numB = tonumber(b:match("(%d+)")) or 9999
-			if numA ~= numB then
-				return numA < numB
-			end
-			return a < b
-		end)
-
-		for _, name in ipairs(found) do
-			table.insert(zones, name)
-		end
-
-		for i = 1, 35 do
-			local zName = "Zone " .. tostring(i)
-			local compactName = "Zone" .. tostring(i)
-			if not seen[zName] and not seen[compactName] then
-				seen[zName] = true
-				table.insert(zones, zName)
-			end
+		local totalToDisplay = math.max(maxZone, 25)
+		for i = 1, totalToDisplay do
+			table.insert(zones, "Zone " .. tostring(i))
 		end
 
 		return zones
@@ -2399,11 +2389,14 @@ do
 					local eggsFolder = zoneFolder:FindFirstChild("Eggs")
 					if eggsFolder then
 						for _, eggContainer in ipairs(eggsFolder:GetChildren()) do
+							if eggContainer.Name:lower():find("nest") then
+								continue
+							end
 							local eggPart = eggContainer:FindFirstChild("Egg")
 							if not eggPart and eggContainer:IsA("BasePart") then
 								eggPart = eggContainer
 							end
-							if eggPart and eggPart:IsA("BasePart") and eggPart.Parent then
+							if eggPart and eggPart:IsA("BasePart") and eggPart.Parent and not eggPart.Name:lower():find("nest") then
 								local isBroken = eggPart:GetAttribute("Broken") == true
 								local hp = tonumber(eggPart:GetAttribute("Health"))
 								if not isBroken and (not hp or hp > 0) then
@@ -2535,30 +2528,41 @@ do
 						end
 
 						local reachThreshold = math.clamp(tonumber(autoFarmReach) or 7, 4, 15)
+						local delta = bestEgg.Position - rootPart.Position
+						local flatDelta = Vector3.new(delta.X, 0, delta.Z)
+						local flatDist = flatDelta.Magnitude
 
-						if dist > reachThreshold then
-							-- Walk toward egg at natural character speed
+						if flatDist > reachThreshold then
+							-- Move toward egg at full character speed using directional vector input
 							if AutoFarmStateLabel then
-								AutoFarmStateLabel:SetText(string.format("Farm State: Walking to egg (%dm)", math.floor(dist + 0.5)))
+								AutoFarmStateLabel:SetText(string.format("Farm State: Running to egg (%dm)", math.floor(flatDist + 0.5)))
 							end
-							humanoid:MoveTo(bestEgg.Position)
+
+							-- Direct humanoid:Move runs at 100% of real in-game WalkSpeed (e.g. 234 studs/s) without MoveTo stutter!
+							local moveDir = flatDelta.Unit
+							humanoid:Move(moveDir, false)
+
+							-- Face target egg smoothly while running
+							pcall(function()
+								rootPart.CFrame = CFrame.new(rootPart.Position, Vector3.new(bestEgg.Position.X, rootPart.Position.Y, bestEgg.Position.Z))
+							end)
 
 							-- Unstuck detection
 							if not lastStuckPos or (rootPart.Position - lastStuckPos).Magnitude > 2 then
 								lastStuckPos = rootPart.Position
 								lastStuckTime = os.clock()
-							elseif (os.clock() - lastStuckTime) > 3.0 then
+							elseif (os.clock() - lastStuckTime) > 1.8 then
 								humanoid.Jump = true
 								lastStuckTime = os.clock()
 							end
 
-							task.wait(0.12)
+							task.wait(0.05)
 						else
-							-- In range! In-game native Auto Swing breaks the egg!
+							-- In range! Immediately halt movement so character stays right at the egg
+							humanoid:Move(Vector3.zero, false)
 							if AutoFarmStateLabel then
 								AutoFarmStateLabel:SetText("Farm State: In Range (Auto-Swinging...)")
 							end
-							humanoid:MoveTo(rootPart.Position)
 							lastStuckPos = rootPart.Position
 							lastStuckTime = os.clock()
 
@@ -2573,8 +2577,11 @@ do
 								if curDist > (reachThreshold + 3) then
 									break
 								end
-								task.wait(0.1)
+								task.wait(0.08)
 							end
+
+							-- Stop moving when egg breaks
+							humanoid:Move(Vector3.zero, false)
 
 							-- Egg broken or removed!
 							if not bestEgg.Parent or bestEgg:GetAttribute("Broken") == true or (tonumber(bestEgg:GetAttribute("Health")) or 0) <= 0 then
@@ -2585,11 +2592,12 @@ do
 								if AutoFarmTargetLabel then
 									AutoFarmTargetLabel:SetText("Target: Egg broken! Finding next...")
 								end
-								task.wait(0.15)
+								task.wait(0.1)
 							end
 						end
 					else
 						activeFarmTargetEgg = nil
+						humanoid:Move(Vector3.zero, false)
 						if AutoFarmTargetLabel then
 							AutoFarmTargetLabel:SetText("Target: None found in selected zone")
 						end
@@ -2601,6 +2609,9 @@ do
 				end
 			else
 				activeFarmTargetEgg = nil
+				if character and humanoid then
+					humanoid:Move(Vector3.zero, false)
+				end
 				task.wait(0.4)
 			end
 		end
@@ -4189,6 +4200,13 @@ Toggles.AutoFarmEnabled:OnChanged(function(Value)
 	autoFarmEnabled = Value
 	if not Value then
 		activeFarmTargetEgg = nil
+		pcall(function()
+			local char = player.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			if hum then
+				hum:Move(Vector3.zero, false)
+			end
+		end)
 		if AutoFarmStateLabel then
 			AutoFarmStateLabel:SetText("Farm State: Off")
 		end
