@@ -211,701 +211,700 @@ local Tabs = {
 }
 
 --============================================================================--
---// Tab 1: Auto-Mover (Controls, Visualizer, Session Dashboard)
+--// UI Labels & Shared References
 --============================================================================--
 
-local ControlsBox = Tabs.Mover:AddGroupbox({
-	Side = "Left",
-	Name = "Controls",
-	IconName = "gamepad-2",
-	Description = "Toggle WASD movement and tune cycle settings.",
-})
-
-ControlsBox:AddCheckbox("AutoWASD", {
-	Text = "Enable Auto-Mover",
-	Default = false,
-	Tooltip = "Walks Forward (W), Left (A), Back (S), and Right (D) in a loop",
-}):AddKeyPicker("AutoWASDKey", {
-	Default = "Q",
-	Mode = "Toggle",
-	SyncToggleState = true,
-	Text = "Auto-Mover",
-})
-
-ControlsBox:AddCheckbox("LockAnchorPos", {
-	Text = "Stay on Spot (Anti-Drift)",
-	Default = true,
-	Tooltip = "Saves your starting position and walks back to it after each WASD cycle",
-})
-
-ControlsBox:AddButton("Reset Anchor to Current Spot", function()
-	local character = player.Character
-	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-	if rootPart then
-		anchorPosition = rootPart.Position
-		Library:Notify("Anchor spot updated to current position!", 2)
-	else
-		Library:Notify("Character not found.", 2)
-	end
-end)
-
-ControlsBox:AddCheckbox("AntiAFK", {
-	Text = "Anti-AFK (20m Bypass)",
-	Default = true,
-	Tooltip = "Prevents Roblox Error Code 278 (20-minute idle disconnect)",
-})
-
-ControlsBox:AddCheckbox("AutoReconnect", {
-	Text = "Auto-Reconnect & Execute",
-	Default = true,
-	Tooltip = "Automatically rejoins if kicked/disconnected and re-runs this script",
-})
-
-ControlsBox:AddSlider("WalkDistance", {
-	Text = "Walk Distance",
-	Default = walkDistance,
-	Min = 1,
-	Max = 25,
-	Rounding = 0,
-	Suffix = " studs",
-})
-
-ControlsBox:AddSlider("PauseDuration", {
-	Text = "Pause Between Cycles",
-	Default = pauseDuration,
-	Min = 0,
-	Max = 30,
-	Rounding = 1,
-	Suffix = "s",
-})
-
---// Right Side: Live WASD Key Visualizer \\--
-local VisualizerBox = Tabs.Mover:AddGroupbox({
-	Side = "Right",
-	Name = "Key Visualizer",
-	IconName = "keyboard",
-	Description = "Highlights the active movement direction.",
-})
-
-local StatusLabel = VisualizerBox:AddLabel("StatusLabel", {
-	Text = "Status: Idle",
-	DoesWrap = false,
-})
-
-VisualizerBox:AddDivider()
-
-local keysContainer = Instance.new("Frame")
-keysContainer.Name = "WASDContainer"
-keysContainer.Size = UDim2.new(1, 0, 1, 0)
-keysContainer.BackgroundTransparency = 1
-
-local keysFrame = Instance.new("Frame")
-keysFrame.Name = "KeysGrid"
-keysFrame.Size = UDim2.fromOffset(116, 76)
-keysFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-keysFrame.Position = UDim2.fromScale(0.5, 0.5)
-keysFrame.BackgroundTransparency = 1
-keysFrame.Parent = keysContainer
-
+local StatusLabel
 local keyBoxes = {}
-local keyLayout = {
-	W = UDim2.fromOffset(40, 0),
-	A = UDim2.fromOffset(0, 40),
-	S = UDim2.fromOffset(40, 40),
-	D = UDim2.fromOffset(80, 40),
-}
-
 local idleBgColor = Library.Scheme.MainColor or Color3.fromRGB(20, 20, 22)
 local idleStrokeColor = Library.Scheme.OutlineColor or Color3.fromRGB(36, 36, 39)
 local idleTextColor = Color3.fromRGB(160, 160, 170)
 local activeBgColor = Library.Scheme.AccentColor or Color3.fromRGB(232, 232, 236)
 local activeTextColor = Library.Scheme.BackgroundColor or Color3.fromRGB(14, 14, 15)
 
-for keyName, pos in pairs(keyLayout) do
-	local box = Instance.new("TextLabel")
-	box.Name = "Key_" .. keyName
-	box.Size = UDim2.fromOffset(36, 36)
-	box.Position = pos
-	box.BackgroundColor3 = idleBgColor
-	box.BorderSizePixel = 0
-	box.Text = keyName
-	box.TextColor3 = idleTextColor
-	box.FontFace = Library.Scheme.Font or Font.fromEnum(Enum.Font.GothamBold)
-	box.TextSize = 14
-	box.Parent = keysFrame
+local UptimeLabel, CyclesLabel, PerfLabel, DriftLabel, BestGroundPetLabel
+local AutoProgressBox
+local AutoPetStatusLabel, AutoPickaxeStatusLabel, AutoTrailStatusLabel, AutoPlotStatusLabel, AutoTreadmillStatusLabel
+local TopPet1Label, TopPet2Label, TopPet3Label
+local RareMinCashStatusLabel
+local WebhookBox
 
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, Library.CornerRadius or 6)
-	corner.Parent = box
+do
+	--// Tab 1: Anti-AFK (Controls, Visualizer, Session Dashboard)
+	local ControlsBox = Tabs.Mover:AddGroupbox({
+		Side = "Left",
+		Name = "Controls",
+		IconName = "gamepad-2",
+		Description = "Toggle WASD movement and tune cycle settings.",
+	})
 
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = idleStrokeColor
-	stroke.Thickness = 1
-	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	stroke.Parent = box
+	ControlsBox:AddCheckbox("AutoWASD", {
+		Text = "Enable Auto-Mover",
+		Default = false,
+		Tooltip = "Walks Forward (W), Left (A), Back (S), and Right (D) in a loop",
+	}):AddKeyPicker("AutoWASDKey", {
+		Default = "Q",
+		Mode = "Toggle",
+		SyncToggleState = true,
+		Text = "Auto-Mover",
+	})
 
-	keyBoxes[keyName] = {
-		Label = box,
-		Stroke = stroke,
+	ControlsBox:AddCheckbox("LockAnchorPos", {
+		Text = "Stay on Spot (Anti-Drift)",
+		Default = true,
+		Tooltip = "Saves your starting position and walks back to it after each WASD cycle",
+	})
+
+	ControlsBox:AddButton("Reset Anchor to Current Spot", function()
+		local character = player.Character
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+		if rootPart then
+			anchorPosition = rootPart.Position
+			Library:Notify("Anchor spot updated to current position!", 2)
+		else
+			Library:Notify("Character not found.", 2)
+		end
+	end)
+
+	ControlsBox:AddCheckbox("AntiAFK", {
+		Text = "Anti-AFK (20m Bypass)",
+		Default = true,
+		Tooltip = "Prevents Roblox Error Code 278 (20-minute idle disconnect)",
+	})
+
+	ControlsBox:AddCheckbox("AutoReconnect", {
+		Text = "Auto-Reconnect & Execute",
+		Default = true,
+		Tooltip = "Automatically rejoins if kicked/disconnected and re-runs this script",
+	})
+
+	ControlsBox:AddSlider("WalkDistance", {
+		Text = "Walk Distance",
+		Default = walkDistance,
+		Min = 1,
+		Max = 25,
+		Rounding = 0,
+		Suffix = " studs",
+	})
+
+	ControlsBox:AddSlider("PauseDuration", {
+		Text = "Pause Between Cycles",
+		Default = pauseDuration,
+		Min = 0,
+		Max = 30,
+		Rounding = 1,
+		Suffix = "s",
+	})
+
+	--// Right Side: Live WASD Key Visualizer \\--
+	local VisualizerBox = Tabs.Mover:AddGroupbox({
+		Side = "Right",
+		Name = "Key Visualizer",
+		IconName = "keyboard",
+		Description = "Highlights the active movement direction.",
+	})
+
+	StatusLabel = VisualizerBox:AddLabel("StatusLabel", {
+		Text = "Status: Idle",
+		DoesWrap = false,
+	})
+
+	VisualizerBox:AddDivider()
+
+	local keysContainer = Instance.new("Frame")
+	keysContainer.Name = "WASDContainer"
+	keysContainer.Size = UDim2.new(1, 0, 1, 0)
+	keysContainer.BackgroundTransparency = 1
+
+	local keysFrame = Instance.new("Frame")
+	keysFrame.Name = "KeysGrid"
+	keysFrame.Size = UDim2.fromOffset(116, 76)
+	keysFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+	keysFrame.Position = UDim2.fromScale(0.5, 0.5)
+	keysFrame.BackgroundTransparency = 1
+	keysFrame.Parent = keysContainer
+
+	local keyLayout = {
+		W = UDim2.fromOffset(40, 0),
+		A = UDim2.fromOffset(0, 40),
+		S = UDim2.fromOffset(40, 40),
+		D = UDim2.fromOffset(80, 40),
 	}
+
+	for keyName, pos in pairs(keyLayout) do
+		local box = Instance.new("TextLabel")
+		box.Name = "Key_" .. keyName
+		box.Size = UDim2.fromOffset(36, 36)
+		box.Position = pos
+		box.BackgroundColor3 = idleBgColor
+		box.BorderSizePixel = 0
+		box.Text = keyName
+		box.TextColor3 = idleTextColor
+		box.FontFace = Library.Scheme.Font or Font.fromEnum(Enum.Font.GothamBold)
+		box.TextSize = 14
+		box.Parent = keysFrame
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, Library.CornerRadius or 6)
+		corner.Parent = box
+
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = idleStrokeColor
+		stroke.Thickness = 1
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		stroke.Parent = box
+
+		keyBoxes[keyName] = {
+			Label = box,
+			Stroke = stroke,
+		}
+	end
+
+	VisualizerBox:AddUIPassthrough("WASDVisualizer", {
+		Instance = keysContainer,
+		Height = 86,
+	})
+
+	--// Right Side: Live AFK Session Dashboard \\--
+	local DashboardBox = Tabs.Mover:AddGroupbox({
+		Side = "Right",
+		Name = "Session Dashboard",
+		IconName = "activity",
+		Description = "Live AFK session statistics.",
+	})
+
+	UptimeLabel = DashboardBox:AddLabel("UptimeLabel", {
+		Text = "Uptime: 00h 00m 00s",
+		DoesWrap = false,
+	})
+
+	CyclesLabel = DashboardBox:AddLabel("CyclesLabel", {
+		Text = "Cycles Completed: 0",
+		DoesWrap = false,
+	})
+
+	PerfLabel = DashboardBox:AddLabel("PerfLabel", {
+		Text = "Performance: -- FPS | -- ms",
+		DoesWrap = false,
+	})
+
+	DriftLabel = DashboardBox:AddLabel("DriftLabel", {
+		Text = "Anchor Drift: 0.0 studs",
+		DoesWrap = false,
+	})
+
+	BestGroundPetLabel = DashboardBox:AddLabel("BestGroundPetLabel", {
+		Text = "Best Ground Pet: None",
+		DoesWrap = true,
+	})
+
+	--// Tab 2: Automation (Auto Equip, Pickaxe, Trail, Plot & Treadmill)
+	AutoProgressBox = Tabs.Automation:AddGroupbox({
+		Side = "Left",
+		Name = "Auto-Progression",
+		IconName = "zap",
+		Description = "Safely automates upgrades & purchases when affordable.",
+	})
+
+	AutoProgressBox:AddCheckbox("AutoEquipBestPet", {
+		Text = "Auto Equip Best Pet",
+		Default = false,
+		Tooltip = "Automatically triggers 'Equip Best' in your Pet Inventory so your highest Cash/s pets are always placed",
+	})
+
+	AutoProgressBox:AddCheckbox("AutoBuyPickaxe", {
+		Text = "Auto Buy Best Pickaxe",
+		Default = false,
+		Tooltip = "Automatically purchases and equips the highest Pickaxe tier you can afford",
+	})
+
+	AutoProgressBox:AddCheckbox("AutoBuyTrail", {
+		Text = "Auto Buy Best Trail",
+		Default = false,
+		Tooltip = "Automatically purchases and equips the highest Trail tier you can afford",
+	})
+
+	AutoProgressBox:AddCheckbox("AutoUpgradePlot", {
+		Text = "Auto Upgrade Plot",
+		Default = false,
+		Tooltip = "Automatically upgrades your Plot / Pen when you have enough Cash and it is not at MAX",
+	})
+
+	AutoProgressBox:AddCheckbox("AutoUpgradeTreadmill", {
+		Text = "Auto Upgrade Treadmill",
+		Default = false,
+		Tooltip = "Automatically unlocks and upgrades your Plot Treadmill when you have enough Cash and it is not at MAX",
+	})
+
+	AutoProgressBox:AddDivider()
+
+	AutoProgressBox:AddSlider("AutoProgressionInterval", {
+		Text = "Automation Check Interval",
+		Default = autoProgressionInterval,
+		Min = 3,
+		Max = 30,
+		Rounding = 0,
+		Suffix = "s",
+		Tooltip = "How often the automation checks your Cash and triggers affordable upgrades",
+	})
+
+	local AutoStatusBox = Tabs.Automation:AddGroupbox({
+		Side = "Right",
+		Name = "Live Progression Status",
+		IconName = "activity",
+		Description = "Real-time status of your equipment and plot upgrades.",
+	})
+
+	AutoPetStatusLabel = AutoStatusBox:AddLabel("AutoPetStatusLabel", {
+		Text = "Best Pet: Off",
+		DoesWrap = true,
+	})
+
+	AutoPickaxeStatusLabel = AutoStatusBox:AddLabel("AutoPickaxeStatusLabel", {
+		Text = "Pickaxe: Checking...",
+		DoesWrap = true,
+	})
+
+	AutoTrailStatusLabel = AutoStatusBox:AddLabel("AutoTrailStatusLabel", {
+		Text = "Trail: Checking...",
+		DoesWrap = true,
+	})
+
+	AutoPlotStatusLabel = AutoStatusBox:AddLabel("AutoPlotStatusLabel", {
+		Text = "Plot: Checking...",
+		DoesWrap = true,
+	})
+
+	AutoTreadmillStatusLabel = AutoStatusBox:AddLabel("AutoTreadmillStatusLabel", {
+		Text = "Treadmill: Checking...",
+		DoesWrap = true,
+	})
+
+	--// Tab 3: Visuals (Player ESP)
+	local EspMainBox = Tabs.Visuals:AddGroupbox({
+		Side = "Left",
+		Name = "Player ESP",
+		IconName = "users",
+		Description = "Client-side player highlights and overhead info tags.",
+	})
+
+	EspMainBox:AddCheckbox("EspEnabled", {
+		Text = "Enable Player ESP",
+		Default = false,
+		Tooltip = "Shows other players through walls with customizable overhead tags",
+	})
+		:AddKeyPicker("EspKey", {
+			Default = "E",
+			Mode = "Toggle",
+			SyncToggleState = true,
+			Text = "Player ESP",
+		})
+		:AddColorPicker("EspColor", {
+			Default = espColor,
+			Title = "ESP Color",
+		})
+
+	EspMainBox:AddCheckbox("EspUniqueColors", {
+		Text = "Unique Color per Player",
+		Default = true,
+		Tooltip = "Gives every player in the server a distinct highlight & tag color so overlapping tags are easy to tell apart",
+	})
+
+	EspMainBox:AddCheckbox("EspHighlight", {
+		Text = "Player Highlight (Chams)",
+		Default = true,
+		Tooltip = "Renders a through-wall outline and fill on player characters",
+	})
+
+	EspMainBox:AddCheckbox("EspBillboard", {
+		Text = "Overhead Info Tag",
+		Default = true,
+		Tooltip = "Displays floating text above each player with Name, Distance, Health, and Stats",
+	})
+
+	EspMainBox:AddDropdown("EspInfo", {
+		Text = "Tag Information",
+		Values = { "Name", "Distance", "Health", "Stats" },
+		Multi = true,
+		Default = { "Name", "Distance", "Stats" },
+		Tooltip = "Select which details appear above each player",
+	})
+
+	local PetEspBox = Tabs.Visuals:AddGroupbox({
+		Side = "Left",
+		Name = "Hatched Pet ESP",
+		IconName = "egg",
+		Description = "Highlights hatched pets on the ground with Name, Rarity, Weight & Cash/s.",
+	})
+
+	PetEspBox:AddCheckbox("PetEspEnabled", {
+		Text = "Enable Hatched Pet ESP",
+		Default = false,
+		Tooltip = "Shows hatched pets in workspace.AnimalPickups through walls",
+	})
+		:AddKeyPicker("PetEspKey", {
+			Default = "P",
+			Mode = "Toggle",
+			SyncToggleState = true,
+			Text = "Pet ESP",
+		})
+		:AddColorPicker("PetEspColor", {
+			Default = petEspColor,
+			Title = "Pet ESP Color",
+		})
+
+	PetEspBox:AddCheckbox("PetEspColorByRarity", {
+		Text = "Color by Rarity",
+		Default = true,
+		Tooltip = "Automatically colors each pet's highlight and tag based on its Rarity (Divine, Cosmic, etc.)",
+	})
+
+	PetEspBox:AddCheckbox("PetEspHighlight", {
+		Text = "Pet Highlight (Chams)",
+		Default = true,
+		Tooltip = "Outlines and fills hatched pet models through walls",
+	})
+
+	PetEspBox:AddCheckbox("PetEspBillboard", {
+		Text = "Pet Overhead Tag",
+		Default = true,
+		Tooltip = "Shows floating tag with Name, Rarity, Weight (KG), and Cash/s",
+	})
+
+	PetEspBox:AddDropdown("PetRarityFilter", {
+		Text = "Rarity Filter",
+		Values = petRarityList,
+		Multi = true,
+		Searchable = true,
+		MaxVisibleDropdownItems = 10,
+		Default = petRarityList,
+		Tooltip = "Only hatched pets with the selected rarities will be shown in the ESP",
+	})
+
+	PetEspBox:AddButton("Select All Rarities", function()
+		local all = {}
+		for _, r in ipairs(petRarityList) do
+			all[r] = true
+		end
+		Options.PetRarityFilter:SetValue(all)
+	end):AddButton("Clear All", function()
+		Options.PetRarityFilter:SetValue({})
+	end)
+
+	PetEspBox:AddInput("PetEspMinCash", {
+		Text = "Min Cash/s Filter (e.g. 500M, 10B, 50T)",
+		Default = "0",
+		Placeholder = "0 = Any (or 500M, 10B, 50T, 1Qa)",
+		ClearTextOnFocus = false,
+		Tooltip = "Only show hatched pets in ESP that generate at least this much Cash/s (supports K, M, B, T, Qa, Qi)",
+	})
+
+	PetEspBox:AddDropdown("PetEspInfo", {
+		Text = "Pet Tag Information",
+		Values = { "Name", "Rarity", "Weight", "Cash/s", "Timer", "Distance" },
+		Multi = true,
+		Default = { "Name", "Rarity", "Weight", "Cash/s", "Timer", "Distance" },
+		Tooltip = "Select which details appear on hatched pets",
+	})
+
+	local TopPetsRadarBox = Tabs.Visuals:AddGroupbox({
+		Side = "Right",
+		Name = "Live Top-Pets Radar",
+		IconName = "radar",
+		Description = "Highest Cash/s pets currently on the ground across the server.",
+	})
+
+	TopPet1Label = TopPetsRadarBox:AddLabel("TopPet1Label", {
+		Text = "#1: Scanning workspace...",
+		DoesWrap = true,
+	})
+
+	TopPet2Label = TopPetsRadarBox:AddLabel("TopPet2Label", {
+		Text = "#2: --",
+		DoesWrap = true,
+	})
+
+	TopPet3Label = TopPetsRadarBox:AddLabel("TopPet3Label", {
+		Text = "#3: --",
+		DoesWrap = true,
+	})
+
+	local EggGuardEspBox = Tabs.Visuals:AddGroupbox({
+		Side = "Right",
+		Name = "Egg & Guard ESP",
+		IconName = "shield-alert",
+		Description = "Filter high-luck eggs and track roaming/chasing zone guards.",
+	})
+
+	EggGuardEspBox:AddCheckbox("EggEspEnabled", {
+		Text = "Enable Egg ESP",
+		Default = false,
+		Tooltip = "Highlights unbroken eggs that meet your minimum Luck multiplier & rarity filter",
+	})
+		:AddKeyPicker("EggEspKey", {
+			Default = "G",
+			Mode = "Toggle",
+			SyncToggleState = true,
+			Text = "Egg ESP",
+		})
+		:AddColorPicker("EggEspColor", {
+			Default = eggEspColor,
+			Title = "Egg ESP Color",
+		})
+
+	EggGuardEspBox:AddCheckbox("EggEspColorByRarity", {
+		Text = "Color Eggs by Rarity",
+		Default = true,
+		Tooltip = "Colors each egg's highlight and overhead tag using its rarity tier",
+	})
+
+	EggGuardEspBox:AddSlider("EggMinLuck", {
+		Text = "Egg Min Luck Filter",
+		Default = eggMinLuck,
+		Min = 0,
+		Max = 2000,
+		Rounding = 0,
+		Suffix = "x Luck",
+		Tooltip = "Only highlights eggs with Luck multiplier >= this value (0x = show all)",
+	})
+
+	EggGuardEspBox:AddDropdown("EggRarityFilter", {
+		Text = "Egg Rarity Filter",
+		Values = petRarityList,
+		Multi = true,
+		Searchable = true,
+		MaxVisibleDropdownItems = 10,
+		Default = petRarityList,
+		Tooltip = "Only unbroken eggs with the selected rarities will be shown",
+	})
+
+	EggGuardEspBox:AddDivider()
+
+	EggGuardEspBox:AddCheckbox("GuardEspEnabled", {
+		Text = "Enable Zone Guard / Boss ESP",
+		Default = false,
+		Tooltip = "Tracks zone guards (like IceYeti) through walls with state (Roaming vs Chasing) and distance",
+	})
+
+	EggGuardEspBox:AddCheckbox("GuardWarnEnabled", {
+		Text = "Guard Proximity Warning",
+		Default = true,
+		Tooltip = "Alerts you with a notification and sound when a zone guard gets close or starts chasing",
+	})
+
+	EggGuardEspBox:AddSlider("GuardWarnDistance", {
+		Text = "Guard Warning Distance",
+		Default = guardWarnDistance,
+		Min = 15,
+		Max = 150,
+		Rounding = 0,
+		Suffix = " studs",
+	})
+
+	local EspStyleBox = Tabs.Visuals:AddGroupbox({
+		Side = "Right",
+		Name = "ESP Appearance",
+		IconName = "sliders-horizontal",
+		Description = "Global range, font size, and highlight transparency for all ESPs.",
+	})
+
+	EspStyleBox:AddSlider("EspMaxDistance", {
+		Text = "Global Max Distance",
+		Default = espMaxDistance,
+		Min = 50,
+		Max = 5000,
+		Rounding = 0,
+		Suffix = " studs",
+		Tooltip = "Uniform maximum render distance for Player ESP, Hatched Pet ESP, Egg ESP, and Guard ESP",
+	})
+
+	EspStyleBox:AddSlider("EspTextSize", {
+		Text = "Tag Text Size",
+		Default = espTextSize,
+		Min = 10,
+		Max = 20,
+		Rounding = 0,
+		Suffix = " px",
+	})
+
+	EspStyleBox:AddSlider("EspFillTrans", {
+		Text = "Highlight Fill Transparency",
+		Default = espFillTrans,
+		Min = 0,
+		Max = 1,
+		Rounding = 2,
+	})
+
+	EspStyleBox:AddSlider("EspOutlineTrans", {
+		Text = "Highlight Outline Transparency",
+		Default = espOutlineTrans,
+		Min = 0,
+		Max = 1,
+		Rounding = 2,
+	})
+
+	--// Tab 4: AFK & Alerts (CPU/GPU Saver + Rare Pet Alerts + Discord Webhook)
+	local PowerBox = Tabs.Utilities:AddGroupbox({
+		Side = "Left",
+		Name = "CPU / GPU Saver",
+		IconName = "cpu",
+		Description = "Reduces power and heat during long AFK sessions.",
+	})
+
+	PowerBox:AddCheckbox("LowPowerMode", {
+		Text = "Low Power Mode (Disable 3D)",
+		Default = false,
+		Tooltip = "Disables 3D world rendering and caps FPS while keeping this UI visible",
+	}):AddKeyPicker("LowPowerKey", {
+		Default = "L",
+		Mode = "Toggle",
+		SyncToggleState = true,
+		Text = "Low Power Mode",
+	})
+
+	PowerBox:AddSlider("AfkFpsCap", {
+		Text = "Low Power FPS Cap",
+		Default = afkFpsCap,
+		Min = 5,
+		Max = 60,
+		Rounding = 0,
+		Suffix = " FPS",
+	})
+
+	local RareAlertBox = Tabs.Utilities:AddGroupbox({
+		Side = "Left",
+		Name = "Rare Pet Spawn Alerts",
+		IconName = "sparkles",
+		Description = "Instant sound & Discord alert when a high-tier pet hatches.",
+	})
+
+	RareAlertBox:AddCheckbox("RarePetAlertEnabled", {
+		Text = "Enable Rare Pet Spawn Alert",
+		Default = true,
+		Tooltip = "Watches workspace.AnimalPickups and alerts you as soon as a matching pet spawns",
+	})
+
+	RareAlertBox:AddCheckbox("RarePetSoundEnabled", {
+		Text = "Play Chime Sound on Spawn",
+		Default = true,
+		Tooltip = "Plays a client-side notification sound when a rare pet spawns",
+	})
+
+	RareAlertBox:AddCheckbox("RarePetWebhookEnabled", {
+		Text = "Send Instant Discord Ping",
+		Default = true,
+		Tooltip = "Posts a rich Discord embed with Pet Name, Rarity, Weight, Cash/s, and Timer",
+	})
+
+	RareAlertBox:AddDropdown("RarePetAlertRarities", {
+		Text = "Alert Rarity Tiers",
+		Values = petRarityList,
+		Multi = true,
+		Searchable = true,
+		MaxVisibleDropdownItems = 10,
+		Default = defaultRareAlertTiers,
+		Tooltip = "Select which rarities trigger a Rare Pet Spawn Alert",
+	})
+
+	RareAlertBox:AddInput("RarePetMinCash", {
+		Text = "Min Cash/s Filter (e.g. 500M, 10B, 50T)",
+		Default = "0",
+		Placeholder = "0 = Any (or 500M, 10B, 50T, 1Qa)",
+		ClearTextOnFocus = false,
+		Tooltip = "Type any minimum Cash/s threshold using K, M, B, T, Qa, Qi (e.g. 500M, 25B, 50T)",
+	})
+
+	RareMinCashStatusLabel = RareAlertBox:AddLabel("RareMinCashStatusLabel", {
+		Text = "Active Min Filter: Any ($0/s)",
+		DoesWrap = false,
+	})
+
+	WebhookBox = Tabs.Utilities:AddGroupbox({
+		Side = "Right",
+		Name = "Discord Webhook Alerts",
+		IconName = "bell",
+		Description = "Sends read-only game progress & AFK status to Discord.",
+	})
+
+	WebhookBox:AddInput("WebhookUrl", {
+		Text = "Webhook URL",
+		Placeholder = "https://discord.com/api/webhooks/...",
+		ClearTextOnFocus = false,
+	})
+
+	WebhookBox:AddCheckbox("WebhookNotifyEvents", {
+		Text = "Alert on Disconnect & Rejoin",
+		Default = true,
+		Tooltip = "Sends a Discord alert when kicked/disconnected and when reconnected",
+	})
+
+	WebhookBox:AddCheckbox("WebhookHeartbeat", {
+		Text = "Periodic Progress Report",
+		Default = false,
+		Tooltip = "Sends your Cash, Speed, Pets, and Session progress to Discord",
+	})
+
+	WebhookBox:AddSlider("WebhookInterval", {
+		Text = "Report Interval",
+		Default = webhookIntervalMin,
+		Min = 5,
+		Max = 120,
+		Rounding = 0,
+		Suffix = " min",
+	})
+
+	--// Tab 5: Config (Quick Config & SaveManager)
+	SaveManager:SetLibrary(Library)
+	SaveManager:IgnoreThemeSettings()
+	SaveManager:SetIgnoreIndexes({ "MenuKeybind", "AutoSaveChanges" })
+	SaveManager:SetFolder("AllainAutomation/wasd")
+
+	local QuickConfigBox = Tabs.Config:AddGroupbox({
+		Side = "Left",
+		Name = "Quick Config & Autoload",
+		IconName = "zap",
+		Description = "Automatically saves edits to your active autoload config.",
+	})
+
+	QuickConfigBox:AddCheckbox("AutoSaveChanges", {
+		Text = "Auto-Save Edits to Autoload",
+		Default = true,
+		Tooltip = "Automatically saves any slider/checkbox change to your autoload config (or 'default')",
+	})
+
+	QuickConfigBox:AddButton("Save & Set 'default' as Autoload", function()
+		local ok, err = SaveManager:Save("default")
+		if not ok then
+			Library:Notify("Failed to save 'default': " .. tostring(err), 3)
+			return
+		end
+		SaveManager:SaveAutoloadConfig("default")
+		if Options.SaveManager_ConfigList then
+			Options.SaveManager_ConfigList:SetValues(SaveManager:RefreshConfigList())
+			Options.SaveManager_ConfigList:SetValue("default")
+		end
+		Library:Notify("Saved 'default' and set as Autoload!", 3)
+	end)
+
+	QuickConfigBox:AddDivider()
+
+	QuickConfigBox:AddLabel("Menu Keybind"):AddKeyPicker("MenuKeybind", {
+		Default = "RightShift",
+		NoUI = true,
+		Text = "Menu keybind",
+	})
+	Library.ToggleKeybind = Options.MenuKeybind
+
+	QuickConfigBox:AddButton({
+		Text = "Unload Script",
+		Risky = true,
+		Func = function()
+			Library:Unload()
+		end,
+	})
+
+	SaveManager:BuildConfigSection(Tabs.Config)
 end
-
-VisualizerBox:AddUIPassthrough("WASDVisualizer", {
-	Instance = keysContainer,
-	Height = 86,
-})
-
---// Right Side: Live AFK Session Dashboard \\--
-local DashboardBox = Tabs.Mover:AddGroupbox({
-	Side = "Right",
-	Name = "Session Dashboard",
-	IconName = "activity",
-	Description = "Live AFK session statistics.",
-})
-
-local UptimeLabel = DashboardBox:AddLabel("UptimeLabel", {
-	Text = "Uptime: 00h 00m 00s",
-	DoesWrap = false,
-})
-
-local CyclesLabel = DashboardBox:AddLabel("CyclesLabel", {
-	Text = "Cycles Completed: 0",
-	DoesWrap = false,
-})
-
-local PerfLabel = DashboardBox:AddLabel("PerfLabel", {
-	Text = "Performance: -- FPS | -- ms",
-	DoesWrap = false,
-})
-
-local DriftLabel = DashboardBox:AddLabel("DriftLabel", {
-	Text = "Anchor Drift: 0.0 studs",
-	DoesWrap = false,
-})
-
-local BestGroundPetLabel = DashboardBox:AddLabel("BestGroundPetLabel", {
-	Text = "Best Ground Pet: None",
-	DoesWrap = true,
-})
-
---============================================================================--
---// Tab 2: Automation (Auto Equip, Pickaxe, Trail, Plot & Treadmill)
---============================================================================--
-
-local AutoProgressBox = Tabs.Automation:AddGroupbox({
-	Side = "Left",
-	Name = "Auto-Progression",
-	IconName = "zap",
-	Description = "Safely automates upgrades & purchases when affordable.",
-})
-
-AutoProgressBox:AddCheckbox("AutoEquipBestPet", {
-	Text = "Auto Equip Best Pet",
-	Default = false,
-	Tooltip = "Automatically triggers 'Equip Best' in your Pet Inventory so your highest Cash/s pets are always placed",
-})
-
-AutoProgressBox:AddCheckbox("AutoBuyPickaxe", {
-	Text = "Auto Buy Best Pickaxe",
-	Default = false,
-	Tooltip = "Automatically purchases and equips the highest Pickaxe tier you can afford",
-})
-
-AutoProgressBox:AddCheckbox("AutoBuyTrail", {
-	Text = "Auto Buy Best Trail",
-	Default = false,
-	Tooltip = "Automatically purchases and equips the highest Trail tier you can afford",
-})
-
-AutoProgressBox:AddCheckbox("AutoUpgradePlot", {
-	Text = "Auto Upgrade Plot",
-	Default = false,
-	Tooltip = "Automatically upgrades your Plot / Pen when you have enough Cash and it is not at MAX",
-})
-
-AutoProgressBox:AddCheckbox("AutoUpgradeTreadmill", {
-	Text = "Auto Upgrade Treadmill",
-	Default = false,
-	Tooltip = "Automatically unlocks and upgrades your Plot Treadmill when you have enough Cash and it is not at MAX",
-})
-
-AutoProgressBox:AddDivider()
-
-AutoProgressBox:AddSlider("AutoProgressionInterval", {
-	Text = "Automation Check Interval",
-	Default = autoProgressionInterval,
-	Min = 3,
-	Max = 30,
-	Rounding = 0,
-	Suffix = "s",
-	Tooltip = "How often the automation checks your Cash and triggers affordable upgrades",
-})
-
-local AutoStatusBox = Tabs.Automation:AddGroupbox({
-	Side = "Right",
-	Name = "Live Progression Status",
-	IconName = "activity",
-	Description = "Real-time status of your equipment and plot upgrades.",
-})
-
-local AutoPetStatusLabel = AutoStatusBox:AddLabel("AutoPetStatusLabel", {
-	Text = "Best Pet: Off",
-	DoesWrap = true,
-})
-
-local AutoPickaxeStatusLabel = AutoStatusBox:AddLabel("AutoPickaxeStatusLabel", {
-	Text = "Pickaxe: Checking...",
-	DoesWrap = true,
-})
-
-local AutoTrailStatusLabel = AutoStatusBox:AddLabel("AutoTrailStatusLabel", {
-	Text = "Trail: Checking...",
-	DoesWrap = true,
-})
-
-local AutoPlotStatusLabel = AutoStatusBox:AddLabel("AutoPlotStatusLabel", {
-	Text = "Plot: Checking...",
-	DoesWrap = true,
-})
-
-local AutoTreadmillStatusLabel = AutoStatusBox:AddLabel("AutoTreadmillStatusLabel", {
-	Text = "Treadmill: Checking...",
-	DoesWrap = true,
-})
-
---============================================================================--
---// Tab 3: Visuals (Player ESP)
---============================================================================--
-
-local EspMainBox = Tabs.Visuals:AddGroupbox({
-	Side = "Left",
-	Name = "Player ESP",
-	IconName = "users",
-	Description = "Client-side player highlights and overhead info tags.",
-})
-
-EspMainBox:AddCheckbox("EspEnabled", {
-	Text = "Enable Player ESP",
-	Default = false,
-	Tooltip = "Shows other players through walls with customizable overhead tags",
-})
-	:AddKeyPicker("EspKey", {
-		Default = "E",
-		Mode = "Toggle",
-		SyncToggleState = true,
-		Text = "Player ESP",
-	})
-	:AddColorPicker("EspColor", {
-		Default = espColor,
-		Title = "ESP Color",
-	})
-
-EspMainBox:AddCheckbox("EspUniqueColors", {
-	Text = "Unique Color per Player",
-	Default = true,
-	Tooltip = "Gives every player in the server a distinct highlight & tag color so overlapping tags are easy to tell apart",
-})
-
-EspMainBox:AddCheckbox("EspHighlight", {
-	Text = "Player Highlight (Chams)",
-	Default = true,
-	Tooltip = "Renders a through-wall outline and fill on player characters",
-})
-
-EspMainBox:AddCheckbox("EspBillboard", {
-	Text = "Overhead Info Tag",
-	Default = true,
-	Tooltip = "Displays floating text above each player with Name, Distance, Health, and Stats",
-})
-
-EspMainBox:AddDropdown("EspInfo", {
-	Text = "Tag Information",
-	Values = { "Name", "Distance", "Health", "Stats" },
-	Multi = true,
-	Default = { "Name", "Distance", "Stats" },
-	Tooltip = "Select which details appear above each player",
-})
-
-local PetEspBox = Tabs.Visuals:AddGroupbox({
-	Side = "Left",
-	Name = "Hatched Pet ESP",
-	IconName = "egg",
-	Description = "Highlights hatched pets on the ground with Name, Rarity, Weight & Cash/s.",
-})
-
-PetEspBox:AddCheckbox("PetEspEnabled", {
-	Text = "Enable Hatched Pet ESP",
-	Default = false,
-	Tooltip = "Shows hatched pets in workspace.AnimalPickups through walls",
-})
-	:AddKeyPicker("PetEspKey", {
-		Default = "P",
-		Mode = "Toggle",
-		SyncToggleState = true,
-		Text = "Pet ESP",
-	})
-	:AddColorPicker("PetEspColor", {
-		Default = petEspColor,
-		Title = "Pet ESP Color",
-	})
-
-PetEspBox:AddCheckbox("PetEspColorByRarity", {
-	Text = "Color by Rarity",
-	Default = true,
-	Tooltip = "Automatically colors each pet's highlight and tag based on its Rarity (Divine, Cosmic, etc.)",
-})
-
-PetEspBox:AddCheckbox("PetEspHighlight", {
-	Text = "Pet Highlight (Chams)",
-	Default = true,
-	Tooltip = "Outlines and fills hatched pet models through walls",
-})
-
-PetEspBox:AddCheckbox("PetEspBillboard", {
-	Text = "Pet Overhead Tag",
-	Default = true,
-	Tooltip = "Shows floating tag with Name, Rarity, Weight (KG), and Cash/s",
-})
-
-PetEspBox:AddDropdown("PetRarityFilter", {
-	Text = "Rarity Filter",
-	Values = petRarityList,
-	Multi = true,
-	Searchable = true,
-	MaxVisibleDropdownItems = 10,
-	Default = petRarityList,
-	Tooltip = "Only hatched pets with the selected rarities will be shown in the ESP",
-})
-
-PetEspBox:AddButton("Select All Rarities", function()
-	local all = {}
-	for _, r in ipairs(petRarityList) do
-		all[r] = true
-	end
-	Options.PetRarityFilter:SetValue(all)
-end):AddButton("Clear All", function()
-	Options.PetRarityFilter:SetValue({})
-end)
-
-PetEspBox:AddInput("PetEspMinCash", {
-	Text = "Min Cash/s Filter (e.g. 500M, 10B, 50T)",
-	Default = "0",
-	Placeholder = "0 = Any (or 500M, 10B, 50T, 1Qa)",
-	ClearTextOnFocus = false,
-	Tooltip = "Only show hatched pets in ESP that generate at least this much Cash/s (supports K, M, B, T, Qa, Qi)",
-})
-
-PetEspBox:AddDropdown("PetEspInfo", {
-	Text = "Pet Tag Information",
-	Values = { "Name", "Rarity", "Weight", "Cash/s", "Timer", "Distance" },
-	Multi = true,
-	Default = { "Name", "Rarity", "Weight", "Cash/s", "Timer", "Distance" },
-	Tooltip = "Select which details appear on hatched pets",
-})
-
-local TopPetsRadarBox = Tabs.Visuals:AddGroupbox({
-	Side = "Right",
-	Name = "Live Top-Pets Radar",
-	IconName = "radar",
-	Description = "Highest Cash/s pets currently on the ground across the server.",
-})
-
-local TopPet1Label = TopPetsRadarBox:AddLabel("TopPet1Label", {
-	Text = "#1: Scanning workspace...",
-	DoesWrap = true,
-})
-
-local TopPet2Label = TopPetsRadarBox:AddLabel("TopPet2Label", {
-	Text = "#2: --",
-	DoesWrap = true,
-})
-
-local TopPet3Label = TopPetsRadarBox:AddLabel("TopPet3Label", {
-	Text = "#3: --",
-	DoesWrap = true,
-})
-
-local EggGuardEspBox = Tabs.Visuals:AddGroupbox({
-	Side = "Right",
-	Name = "Egg & Guard ESP",
-	IconName = "shield-alert",
-	Description = "Filter high-luck eggs and track roaming/chasing zone guards.",
-})
-
-EggGuardEspBox:AddCheckbox("EggEspEnabled", {
-	Text = "Enable Egg ESP",
-	Default = false,
-	Tooltip = "Highlights unbroken eggs that meet your minimum Luck multiplier & rarity filter",
-})
-	:AddKeyPicker("EggEspKey", {
-		Default = "G",
-		Mode = "Toggle",
-		SyncToggleState = true,
-		Text = "Egg ESP",
-	})
-	:AddColorPicker("EggEspColor", {
-		Default = eggEspColor,
-		Title = "Egg ESP Color",
-	})
-
-EggGuardEspBox:AddCheckbox("EggEspColorByRarity", {
-	Text = "Color Eggs by Rarity",
-	Default = true,
-	Tooltip = "Colors each egg's highlight and overhead tag using its rarity tier",
-})
-
-EggGuardEspBox:AddSlider("EggMinLuck", {
-	Text = "Egg Min Luck Filter",
-	Default = eggMinLuck,
-	Min = 0,
-	Max = 2000,
-	Rounding = 0,
-	Suffix = "x Luck",
-	Tooltip = "Only highlights eggs with Luck multiplier >= this value (0x = show all)",
-})
-
-EggGuardEspBox:AddDropdown("EggRarityFilter", {
-	Text = "Egg Rarity Filter",
-	Values = petRarityList,
-	Multi = true,
-	Searchable = true,
-	MaxVisibleDropdownItems = 10,
-	Default = petRarityList,
-	Tooltip = "Only unbroken eggs with the selected rarities will be shown",
-})
-
-EggGuardEspBox:AddDivider()
-
-EggGuardEspBox:AddCheckbox("GuardEspEnabled", {
-	Text = "Enable Zone Guard / Boss ESP",
-	Default = false,
-	Tooltip = "Tracks zone guards (like IceYeti) through walls with state (Roaming vs Chasing) and distance",
-})
-
-EggGuardEspBox:AddCheckbox("GuardWarnEnabled", {
-	Text = "Guard Proximity Warning",
-	Default = true,
-	Tooltip = "Alerts you with a notification and sound when a zone guard gets close or starts chasing",
-})
-
-EggGuardEspBox:AddSlider("GuardWarnDistance", {
-	Text = "Guard Warning Distance",
-	Default = guardWarnDistance,
-	Min = 15,
-	Max = 150,
-	Rounding = 0,
-	Suffix = " studs",
-})
-
-local EspStyleBox = Tabs.Visuals:AddGroupbox({
-	Side = "Right",
-	Name = "ESP Appearance",
-	IconName = "sliders-horizontal",
-	Description = "Global range, font size, and highlight transparency for all ESPs.",
-})
-
-EspStyleBox:AddSlider("EspMaxDistance", {
-	Text = "Global Max Distance",
-	Default = espMaxDistance,
-	Min = 50,
-	Max = 5000,
-	Rounding = 0,
-	Suffix = " studs",
-	Tooltip = "Uniform maximum render distance for Player ESP, Hatched Pet ESP, Egg ESP, and Guard ESP",
-})
-
-EspStyleBox:AddSlider("EspTextSize", {
-	Text = "Tag Text Size",
-	Default = espTextSize,
-	Min = 10,
-	Max = 20,
-	Rounding = 0,
-	Suffix = " px",
-})
-
-EspStyleBox:AddSlider("EspFillTrans", {
-	Text = "Highlight Fill Transparency",
-	Default = espFillTrans,
-	Min = 0,
-	Max = 1,
-	Rounding = 2,
-})
-
-EspStyleBox:AddSlider("EspOutlineTrans", {
-	Text = "Highlight Outline Transparency",
-	Default = espOutlineTrans,
-	Min = 0,
-	Max = 1,
-	Rounding = 2,
-})
-
---============================================================================--
---// Tab 3: AFK & Alerts (CPU/GPU Saver + Rare Pet Alerts + Discord Webhook)
---============================================================================--
-
-local PowerBox = Tabs.Utilities:AddGroupbox({
-	Side = "Left",
-	Name = "CPU / GPU Saver",
-	IconName = "cpu",
-	Description = "Reduces power and heat during long AFK sessions.",
-})
-
-PowerBox:AddCheckbox("LowPowerMode", {
-	Text = "Low Power Mode (Disable 3D)",
-	Default = false,
-	Tooltip = "Disables 3D world rendering and caps FPS while keeping this UI visible",
-}):AddKeyPicker("LowPowerKey", {
-	Default = "L",
-	Mode = "Toggle",
-	SyncToggleState = true,
-	Text = "Low Power Mode",
-})
-
-PowerBox:AddSlider("AfkFpsCap", {
-	Text = "Low Power FPS Cap",
-	Default = afkFpsCap,
-	Min = 5,
-	Max = 60,
-	Rounding = 0,
-	Suffix = " FPS",
-})
-
-local RareAlertBox = Tabs.Utilities:AddGroupbox({
-	Side = "Left",
-	Name = "Rare Pet Spawn Alerts",
-	IconName = "sparkles",
-	Description = "Instant sound & Discord alert when a high-tier pet hatches.",
-})
-
-RareAlertBox:AddCheckbox("RarePetAlertEnabled", {
-	Text = "Enable Rare Pet Spawn Alert",
-	Default = true,
-	Tooltip = "Watches workspace.AnimalPickups and alerts you as soon as a matching pet spawns",
-})
-
-RareAlertBox:AddCheckbox("RarePetSoundEnabled", {
-	Text = "Play Chime Sound on Spawn",
-	Default = true,
-	Tooltip = "Plays a client-side notification sound when a rare pet spawns",
-})
-
-RareAlertBox:AddCheckbox("RarePetWebhookEnabled", {
-	Text = "Send Instant Discord Ping",
-	Default = true,
-	Tooltip = "Posts a rich Discord embed with Pet Name, Rarity, Weight, Cash/s, and Timer",
-})
-
-RareAlertBox:AddDropdown("RarePetAlertRarities", {
-	Text = "Alert Rarity Tiers",
-	Values = petRarityList,
-	Multi = true,
-	Searchable = true,
-	MaxVisibleDropdownItems = 10,
-	Default = defaultRareAlertTiers,
-	Tooltip = "Select which rarities trigger a Rare Pet Spawn Alert",
-})
-
-RareAlertBox:AddInput("RarePetMinCash", {
-	Text = "Min Cash/s Filter (e.g. 500M, 10B, 50T)",
-	Default = "0",
-	Placeholder = "0 = Any (or 500M, 10B, 50T, 1Qa)",
-	ClearTextOnFocus = false,
-	Tooltip = "Type any minimum Cash/s threshold using K, M, B, T, Qa, Qi (e.g. 500M, 25B, 50T)",
-})
-
-local RareMinCashStatusLabel = RareAlertBox:AddLabel("RareMinCashStatusLabel", {
-	Text = "Active Min Filter: Any ($0/s)",
-	DoesWrap = false,
-})
-
-local WebhookBox = Tabs.Utilities:AddGroupbox({
-	Side = "Right",
-	Name = "Discord Webhook Alerts",
-	IconName = "bell",
-	Description = "Sends read-only game progress & AFK status to Discord.",
-})
-
-WebhookBox:AddInput("WebhookUrl", {
-	Text = "Webhook URL",
-	Placeholder = "https://discord.com/api/webhooks/...",
-	ClearTextOnFocus = false,
-})
-
-WebhookBox:AddCheckbox("WebhookNotifyEvents", {
-	Text = "Alert on Disconnect & Rejoin",
-	Default = true,
-	Tooltip = "Sends a Discord alert when kicked/disconnected and when reconnected",
-})
-
-WebhookBox:AddCheckbox("WebhookHeartbeat", {
-	Text = "Periodic Progress Report",
-	Default = false,
-	Tooltip = "Sends your Cash, Speed, Pets, and Session progress to Discord",
-})
-
-WebhookBox:AddSlider("WebhookInterval", {
-	Text = "Report Interval",
-	Default = webhookIntervalMin,
-	Min = 5,
-	Max = 120,
-	Rounding = 0,
-	Suffix = " min",
-})
-
---============================================================================--
---// Tab 3: Config (Quick Config & SaveManager)
---============================================================================--
-
-SaveManager:SetLibrary(Library)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({ "MenuKeybind", "AutoSaveChanges" })
-SaveManager:SetFolder("AllainAutomation/wasd")
-
-local QuickConfigBox = Tabs.Config:AddGroupbox({
-	Side = "Left",
-	Name = "Quick Config & Autoload",
-	IconName = "zap",
-	Description = "Automatically saves edits to your active autoload config.",
-})
-
-QuickConfigBox:AddCheckbox("AutoSaveChanges", {
-	Text = "Auto-Save Edits to Autoload",
-	Default = true,
-	Tooltip = "Automatically saves any slider/checkbox change to your autoload config (or 'default')",
-})
-
-QuickConfigBox:AddButton("Save & Set 'default' as Autoload", function()
-	local ok, err = SaveManager:Save("default")
-	if not ok then
-		Library:Notify("Failed to save 'default': " .. tostring(err), 3)
-		return
-	end
-	SaveManager:SaveAutoloadConfig("default")
-	if Options.SaveManager_ConfigList then
-		Options.SaveManager_ConfigList:SetValues(SaveManager:RefreshConfigList())
-		Options.SaveManager_ConfigList:SetValue("default")
-	end
-	Library:Notify("Saved 'default' and set as Autoload!", 3)
-end)
-
-QuickConfigBox:AddDivider()
-
-QuickConfigBox:AddLabel("Menu Keybind"):AddKeyPicker("MenuKeybind", {
-	Default = "RightShift",
-	NoUI = true,
-	Text = "Menu keybind",
-})
-Library.ToggleKeybind = Options.MenuKeybind
-
-QuickConfigBox:AddButton({
-	Text = "Unload Script",
-	Risky = true,
-	Func = function()
-		Library:Unload()
-	end,
-})
-
-SaveManager:BuildConfigSection(Tabs.Config)
 
 local function autoSaveActiveConfig()
 	if isInitializingConfig or not autoSaveEnabled then
@@ -1248,90 +1247,92 @@ end)
 --// Safe Auto-Progression Engine (Pet, Pickaxe, Trail, Plot, Treadmill)
 --============================================================================--
 
-local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
+local runAutoProgressionStep
+do
+	local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
 
-local function triggerGuiButton(btn)
-	if not btn or not (btn:IsA("TextButton") or btn:IsA("ImageButton")) then
-		return false
-	end
-	local fired = false
-	if typeof(firesignal) == "function" then
-		pcall(function()
-			firesignal(btn.Activated)
-			fired = true
-		end)
-		pcall(function()
-			firesignal(btn.MouseButton1Click)
-			fired = true
-		end)
-	end
-	local getconns = getconnections or get_signal_cons
-	if getconns then
-		for _, sig in ipairs({ btn.Activated, btn.MouseButton1Click, btn.MouseButton1Down }) do
+	local function triggerGuiButton(btn)
+		if not btn or not (btn:IsA("TextButton") or btn:IsA("ImageButton")) then
+			return false
+		end
+		local fired = false
+		if typeof(firesignal) == "function" then
 			pcall(function()
-				for _, conn in pairs(getconns(sig)) do
-					if conn.Fire then
-						conn:Fire()
-						fired = true
-					elseif conn.Function then
-						task.spawn(conn.Function)
-						fired = true
-					end
-				end
+				firesignal(btn.Activated)
+				fired = true
+			end)
+			pcall(function()
+				firesignal(btn.MouseButton1Click)
+				fired = true
 			end)
 		end
+		local getconns = getconnections or get_signal_cons
+		if getconns then
+			for _, sig in ipairs({ btn.Activated, btn.MouseButton1Click, btn.MouseButton1Down }) do
+				pcall(function()
+					for _, conn in pairs(getconns(sig)) do
+						if conn.Fire then
+							conn:Fire()
+							fired = true
+						elseif conn.Function then
+							task.spawn(conn.Function)
+							fired = true
+						end
+					end
+				end)
+			end
+		end
+		return fired
 	end
-	return fired
-end
 
-local function parseOwnedTierSet(csvStr)
-	local set = {}
-	local maxTier = 0
-	if typeof(csvStr) == "number" then
-		set[csvStr] = true
-		return set, csvStr
-	end
-	if typeof(csvStr) == "string" then
-		for numStr in csvStr:gmatch("(%d+)") do
-			local n = tonumber(numStr)
-			if n then
-				set[n] = true
-				if n > maxTier then
-					maxTier = n
+	local function parseOwnedTierSet(csvStr)
+		local set = {}
+		local maxTier = 0
+		if typeof(csvStr) == "number" then
+			set[csvStr] = true
+			return set, csvStr
+		end
+		if typeof(csvStr) == "string" then
+			for numStr in csvStr:gmatch("(%d+)") do
+				local n = tonumber(numStr)
+				if n then
+					set[n] = true
+					if n > maxTier then
+						maxTier = n
+					end
 				end
 			end
 		end
+		return set, maxTier
 	end
-	return set, maxTier
-end
 
-local function findOwnedPlot()
-	local plotsFolder = workspace:FindFirstChild("Plots")
-	if not plotsFolder then
+	local function findOwnedPlot()
+		local plotsFolder = workspace:FindFirstChild("Plots")
+		if not plotsFolder then
+			return nil
+		end
+		for _, plot in ipairs(plotsFolder:GetChildren()) do
+			if plot:GetAttribute("OwnerUserId") == player.UserId then
+				return plot
+			end
+		end
 		return nil
 	end
-	for _, plot in ipairs(plotsFolder:GetChildren()) do
-		if plot:GetAttribute("OwnerUserId") == player.UserId then
-			return plot
-		end
-	end
-	return nil
-end
 
-local function readChildLabelText(parentInst, childName)
-	if not parentInst then
+	local function readChildLabelText(parentInst, childName)
+		if not parentInst then
+			return ""
+		end
+		local ch = parentInst:FindFirstChild(childName)
+		if ch and (ch:IsA("TextLabel") or ch:IsA("TextButton")) then
+			return (ch.Text or ""):gsub("<[^>]+>", ""):match("^%s*(.-)%s*$") or ""
+		end
 		return ""
 	end
-	local ch = parentInst:FindFirstChild(childName)
-	if ch and (ch:IsA("TextLabel") or ch:IsA("TextButton")) then
-		return (ch.Text or ""):gsub("<[^>]+>", ""):match("^%s*(.-)%s*$") or ""
-	end
-	return ""
-end
 
-local lastEquipBestTime = 0
+	local lastEquipBestTime = 0
 
-local function runAutoProgressionStep(forceImmediate)
+	runAutoProgressionStep = function(forceImmediate)
 	local rawCash = player:GetAttribute("Cash")
 	local currentCash = (typeof(rawCash) == "number" and rawCash) or parseAbbreviatedNumber(rawCash) or 0
 	local playerGui = player:FindFirstChild("PlayerGui")
@@ -1595,6 +1596,7 @@ local function runAutoProgressionStep(forceImmediate)
 			local suffix = treadPriceText ~= "" and (" · Next: " .. treadPriceText) or ""
 			AutoTreadmillStatusLabel:SetText("Treadmill: " .. (treadLevelText ~= "" and treadLevelText or "Unknown") .. suffix)
 		end
+	end
 	end
 end
 
@@ -2168,7 +2170,11 @@ local playerRemovingConn = Players.PlayerRemoving:Connect(removePlayerEsp)
 --============================================================================--
 
 local petEspObjects = {}
+local eggEspObjects = {}
+local guardEspObjects = {}
+local parseCashFilterInput, updateAllPetEsp, updateAllEggEsp, updateAllGuardEsp, scanGroundPetsAndAlerts
 
+do
 local rarityColors = {
 	common = Color3.fromRGB(190, 190, 195),
 	uncommon = Color3.fromRGB(95, 220, 110),
@@ -2327,7 +2333,7 @@ local function isPetRarityAllowed(rarityStr)
 	return false
 end
 
-local function parseCashFilterInput(rawStr)
+parseCashFilterInput = function(rawStr)
 	if typeof(rawStr) == "number" then
 		return math.max(0, rawStr)
 	end
@@ -2348,7 +2354,7 @@ local function parseCashFilterInput(rawStr)
 	return parsed
 end
 
-local function updateAllPetEsp()
+updateAllPetEsp = function()
 	local pickupsFolder = workspace:FindFirstChild("AnimalPickups")
 
 	if not petEspEnabled or Library.Unloaded or not pickupsFolder then
@@ -2476,8 +2482,6 @@ end
 --// Egg ESP, Zone Guard ESP & Warning, Top-Pets Radar & Rare Spawn Alerts
 --============================================================================--
 
-local eggEspObjects = {}
-local guardEspObjects = {}
 local guardLastWarnTime = {}
 local alertedPetKeys = {}
 local petFirstSeenAt = setmetatable({}, { __mode = "k" })
@@ -2638,7 +2642,7 @@ local function collectAllEggParts()
 	return list
 end
 
-local function updateAllEggEsp()
+updateAllEggEsp = function()
 	if not eggEspEnabled or Library.Unloaded then
 		for _, entry in pairs(eggEspObjects) do
 			if entry.Highlight then
@@ -2832,7 +2836,7 @@ local function collectAllGuardModels()
 	return guards
 end
 
-local function updateAllGuardEsp()
+updateAllGuardEsp = function()
 	if (not guardEspEnabled and not guardWarnEnabled) or Library.Unloaded then
 		for _, entry in pairs(guardEspObjects) do
 			if entry.Highlight then
@@ -2921,7 +2925,7 @@ local function updateAllGuardEsp()
 end
 
 --// 3. Live Top-Pets Radar & Rare Pet Spawn Alert \\--
-local function scanGroundPetsAndAlerts()
+scanGroundPetsAndAlerts = function()
 	local pickupsFolder = workspace:FindFirstChild("AnimalPickups")
 	if not pickupsFolder then
 		TopPet1Label:SetText("#1: None on ground")
@@ -3064,6 +3068,7 @@ local function scanGroundPetsAndAlerts()
 		local best = groundPets[1]
 		BestGroundPetLabel:SetText(string.format("Best Pet: %s (%s) %s [%dm]", best.name, best.rarity, best.cpsText, best.dist))
 	end
+end
 end
 
 task.spawn(function()
