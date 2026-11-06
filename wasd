@@ -180,6 +180,7 @@ local autoBuyPickaxeEnabled = false
 local autoBuyTrailEnabled = false
 local autoUpgradePlotEnabled = false
 local autoUpgradeTreadmillEnabled = false
+local autoSwingEnabled = true
 local autoProgressionInterval = 6
 
 local anchorPosition = nil
@@ -224,7 +225,7 @@ local activeTextColor = Library.Scheme.BackgroundColor or Color3.fromRGB(14, 14,
 
 local UptimeLabel, CyclesLabel, PerfLabel, DriftLabel, BestGroundPetLabel
 local AutoProgressBox
-local AutoPetStatusLabel, AutoPickaxeStatusLabel, AutoTrailStatusLabel, AutoPlotStatusLabel, AutoTreadmillStatusLabel
+local AutoPetStatusLabel, AutoPickaxeStatusLabel, AutoTrailStatusLabel, AutoPlotStatusLabel, AutoTreadmillStatusLabel, AutoSwingStatusLabel
 local TopPet1Label, TopPet2Label, TopPet3Label
 local RareMinCashStatusLabel
 local WebhookBox, scanSpeedAndZoneData
@@ -436,6 +437,12 @@ do
 		Tooltip = "Automatically unlocks and upgrades your Plot Treadmill when you have enough Cash and it is not at MAX",
 	})
 
+	AutoProgressBox:AddCheckbox("AutoSwingEnabled", {
+		Text = "Auto Turn On Auto Swing",
+		Default = true,
+		Tooltip = "Automatically enables the in-game Auto Swing feature on execute and keeps it active",
+	})
+
 	AutoProgressBox:AddDivider()
 
 	AutoProgressBox:AddSlider("AutoProgressionInterval", {
@@ -477,6 +484,11 @@ do
 
 	AutoTreadmillStatusLabel = AutoStatusBox:AddLabel("AutoTreadmillStatusLabel", {
 		Text = "Treadmill: Checking...",
+		DoesWrap = true,
+	})
+
+	AutoSwingStatusLabel = AutoStatusBox:AddLabel("AutoSwingStatusLabel", {
+		Text = "Auto Swing: Checking...",
 		DoesWrap = true,
 	})
 
@@ -1476,7 +1488,90 @@ do
 				end)
 			end
 		end
+		if not fired and VirtualInputManager and btn.AbsolutePosition and btn.AbsoluteSize then
+			pcall(function()
+				local center = btn.AbsolutePosition + btn.AbsoluteSize / 2
+				VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, true, game, 0)
+				task.wait(0.04)
+				VirtualInputManager:SendMouseButtonEvent(center.X, center.Y, 0, false, game, 0)
+				fired = true
+			end)
+		end
 		return fired
+	end
+
+	local function isAutoSwingActive(autoSwingObj)
+		if not autoSwingObj then return false end
+		local colorAlpha = autoSwingObj:FindFirstChild("AutoSwingColorAlpha")
+		if not colorAlpha then
+			colorAlpha = autoSwingObj:FindFirstChildWhichIsA("NumberValue") or autoSwingObj:FindFirstChildWhichIsA("IntValue")
+		end
+		if colorAlpha and typeof(colorAlpha.Value) == "number" then
+			return colorAlpha.Value > 0.5
+		end
+		local attr = autoSwingObj:GetAttribute("AutoSwingColorAlpha") or autoSwingObj:GetAttribute("Active") or autoSwingObj:GetAttribute("Enabled")
+		if typeof(attr) == "number" then
+			return attr > 0.5
+		elseif typeof(attr) == "boolean" then
+			return attr
+		end
+		return false
+	end
+
+	local function findAutoSwingElement()
+		local pGui = player:FindFirstChild("PlayerGui")
+		if not pGui then return nil, nil end
+		local mainGui = pGui:FindFirstChild("MainGUI")
+		local autoSwing = mainGui and mainGui:FindFirstChild("AutoSwing", true)
+		if not autoSwing then
+			for _, desc in ipairs(pGui:GetDescendants()) do
+				local n = desc.Name:lower():gsub("[%s_]", "")
+				if n == "autoswing" then
+					autoSwing = desc
+					break
+				end
+			end
+		end
+		if not autoSwing then return nil, nil end
+
+		local btn = nil
+		if autoSwing:IsA("GuiButton") then
+			btn = autoSwing
+		else
+			btn = autoSwing:FindFirstChildWhichIsA("GuiButton")
+				or autoSwing:FindFirstChild("Button")
+				or autoSwing:FindFirstChild("Toggle")
+				or autoSwing:FindFirstChildWhichIsA("GuiButton", true)
+		end
+		return autoSwing, btn
+	end
+
+	local function enableInGameAutoSwing()
+		local autoSwingObj, btn = findAutoSwingElement()
+		if not autoSwingObj then
+			if AutoSwingStatusLabel then
+				AutoSwingStatusLabel:SetText("Auto Swing: Not Found")
+			end
+			return false
+		end
+
+		if isAutoSwingActive(autoSwingObj) then
+			if AutoSwingStatusLabel then
+				AutoSwingStatusLabel:SetText("Auto Swing: Active (In-Game)")
+			end
+			return true
+		end
+
+		if btn then
+			triggerGuiButton(btn)
+			task.wait(0.15)
+			local active = isAutoSwingActive(autoSwingObj)
+			if AutoSwingStatusLabel then
+				AutoSwingStatusLabel:SetText(active and "Auto Swing: Active (In-Game)" or "Auto Swing: Enabled")
+			end
+			return active
+		end
+		return false
 	end
 
 	local function parseOwnedTierSet(csvStr)
@@ -1790,6 +1885,13 @@ do
 			local suffix = treadPriceText ~= "" and (" · Next: " .. treadPriceText) or ""
 			AutoTreadmillStatusLabel:SetText("Treadmill: " .. (treadLevelText ~= "" and treadLevelText or "Unknown") .. suffix)
 		end
+	end
+
+	-- 6. In-Game Auto Swing (Built-in Auto Turn On)
+	if autoSwingEnabled then
+		pcall(enableInGameAutoSwing)
+	elseif AutoSwingStatusLabel then
+		AutoSwingStatusLabel:SetText("Auto Swing: Off")
 	end
 	end
 end
@@ -3683,6 +3785,16 @@ Options.AutoProgressionInterval:OnChanged(function(Value)
 	autoSaveActiveConfig()
 end)
 
+Toggles.AutoSwingEnabled:OnChanged(function(Value)
+	autoSwingEnabled = Value
+	if Value then
+		pcall(runAutoProgressionStep, true)
+	elseif AutoSwingStatusLabel then
+		AutoSwingStatusLabel:SetText("Auto Swing: Off")
+	end
+	autoSaveActiveConfig()
+end)
+
 --// Load Autoload Config on Startup \\--
 SaveManager:LoadAutoloadConfig()
 task.delay(0.6, function()
@@ -3698,6 +3810,20 @@ task.delay(0.6, function()
 			0x57F287
 		)
 	end
+end)
+
+-- Additional delayed check to ensure in-game Auto Swing is active after full UI load
+task.delay(1.5, function()
+	pcall(runAutoProgressionStep, false)
+end)
+
+-- Re-enable Auto Swing on character respawn
+player.CharacterAdded:Connect(function()
+	task.delay(1.2, function()
+		if autoSwingEnabled then
+			pcall(runAutoProgressionStep, false)
+		end
+	end)
 end)
 
 Library:OnUnload(function()
