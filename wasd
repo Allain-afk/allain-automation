@@ -2612,14 +2612,12 @@ do
 								AutoFarmStateLabel:SetText(string.format("Farm State: Running to egg (%dm %s)", math.floor(flatDist + 0.5), speedTag))
 							end
 
-							-- Issue MoveTo ONCE so Roblox accelerates to desired WalkSpeed without stutter!
-							humanoid:MoveTo(moveTargetPos)
-							local lastMoveIssueTime = os.clock()
 							lastStuckPos = rootPart.Position
 							lastStuckTime = os.clock()
 
 							while autoFarmEnabled and not Library.Unloaded and bestEgg.Parent do
-								local curFlatDist = Vector3.new(bestEgg.Position.X - rootPart.Position.X, 0, bestEgg.Position.Z - rootPart.Position.Z).Magnitude
+								local curDelta = Vector3.new(bestEgg.Position.X - rootPart.Position.X, 0, bestEgg.Position.Z - rootPart.Position.Z)
+								local curFlatDist = curDelta.Magnitude
 								if curFlatDist <= reachThreshold then
 									break
 								end
@@ -2640,26 +2638,26 @@ do
 									humanoid.WalkSpeed = curDesired
 								end
 
+								-- Steer directly toward the egg at full running speed (no waypoint deceleration!)
+								if curFlatDist > 0.1 then
+									humanoid:Move(curDelta.Unit, false)
+								end
+
 								-- Unstuck handling
 								if (rootPart.Position - lastStuckPos).Magnitude > 2 then
 									lastStuckPos = rootPart.Position
 									lastStuckTime = os.clock()
-								elseif (os.clock() - lastStuckTime) > 2.0 then
+								elseif (os.clock() - lastStuckTime) > 1.8 then
 									humanoid.Jump = true
-									humanoid:MoveTo(moveTargetPos)
 									lastStuckPos = rootPart.Position
 									lastStuckTime = os.clock()
-									lastMoveIssueTime = os.clock()
 								end
 
-								-- Re-issue MoveTo only if 4 seconds passed (avoids Roblox 8s timeout without stuttering)
-								if (os.clock() - lastMoveIssueTime) > 4.0 then
-									humanoid:MoveTo(moveTargetPos)
-									lastMoveIssueTime = os.clock()
-								end
-
-								task.wait(0.05)
+								RunService.Heartbeat:Wait()
 							end
+
+							-- Halt movement immediately upon reaching the egg
+							humanoid:Move(Vector3.zero, false)
 						end
 
 						-- Restore full legitimate speed when within reach of the egg
@@ -2669,7 +2667,7 @@ do
 						local curDist = (bestEgg.Position - rootPart.Position).Magnitude
 						if curDist <= (reachThreshold + 2) and bestEgg.Parent and bestEgg:GetAttribute("Broken") ~= true then
 							-- Halt movement right in front of egg
-							humanoid:MoveTo(rootPart.Position)
+							humanoid:Move(Vector3.zero, false)
 							if AutoFarmStateLabel then
 								AutoFarmStateLabel:SetText("Farm State: In Range (Auto-Swinging...)")
 							end
@@ -2703,7 +2701,7 @@ do
 					else
 						activeFarmTargetEgg = nil
 						restoreLegitSpeed(humanoid)
-						humanoid:MoveTo(rootPart.Position)
+						humanoid:Move(Vector3.zero, false)
 						if AutoFarmTargetLabel then
 							AutoFarmTargetLabel:SetText("Target: None found in selected zone")
 						end
@@ -2719,6 +2717,7 @@ do
 					local c = player.Character
 					local h = c and c:FindFirstChildOfClass("Humanoid")
 					if h then
+						h:Move(Vector3.zero, false)
 						restoreLegitSpeed(h)
 					end
 				end)
@@ -4314,8 +4313,8 @@ Toggles.AutoFarmEnabled:OnChanged(function(Value)
 			local char = player.Character
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
 			local root = char and char:FindFirstChild("HumanoidRootPart")
-			if hum and root then
-				hum:MoveTo(root.Position)
+			if hum then
+				hum:Move(Vector3.zero, false)
 			end
 			if restoreNativeWalkSpeed then
 				restoreNativeWalkSpeed()
@@ -4395,6 +4394,13 @@ Library:OnUnload(function()
 	isRunning = false
 	autoFarmEnabled = false
 	activeFarmTargetEgg = nil
+	pcall(function()
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum then
+			hum:Move(Vector3.zero, false)
+		end
+	end)
 	if restoreNativeWalkSpeed then
 		pcall(restoreNativeWalkSpeed)
 	end
