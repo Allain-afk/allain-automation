@@ -175,6 +175,13 @@ for _, r in ipairs(defaultRareAlertTiers) do
 	rarePetAlertSelected[r] = true
 end
 
+local autoEquipBestPetEnabled = false
+local autoBuyPickaxeEnabled = false
+local autoBuyTrailEnabled = false
+local autoUpgradePlotEnabled = false
+local autoUpgradeTreadmillEnabled = false
+local autoProgressionInterval = 6
+
 local anchorPosition = nil
 local sessionStartTime = os.clock()
 local completedCycles = 0
@@ -196,7 +203,8 @@ local Window = Library:CreateWindow({
 })
 
 local Tabs = {
-	Mover = Window:AddTab("Auto-Mover", "footprints"),
+	Mover = Window:AddTab("Anti-AFK", "footprints"),
+	Automation = Window:AddTab("Automation", "zap"),
 	Visuals = Window:AddTab("Visuals", "eye"),
 	Utilities = Window:AddTab("AFK & Alerts", "bell"),
 	Config = Window:AddTab("Config", "folder-cog"),
@@ -381,7 +389,92 @@ local BestGroundPetLabel = DashboardBox:AddLabel("BestGroundPetLabel", {
 })
 
 --============================================================================--
---// Tab 2: Visuals (Player ESP)
+--// Tab 2: Automation (Auto Equip, Pickaxe, Trail, Plot & Treadmill)
+--============================================================================--
+
+local AutoProgressBox = Tabs.Automation:AddGroupbox({
+	Side = "Left",
+	Name = "Auto-Progression",
+	IconName = "zap",
+	Description = "Safely automates upgrades & purchases when affordable.",
+})
+
+AutoProgressBox:AddCheckbox("AutoEquipBestPet", {
+	Text = "Auto Equip Best Pet",
+	Default = false,
+	Tooltip = "Automatically triggers 'Equip Best' in your Pet Inventory so your highest Cash/s pets are always placed",
+})
+
+AutoProgressBox:AddCheckbox("AutoBuyPickaxe", {
+	Text = "Auto Buy Best Pickaxe",
+	Default = false,
+	Tooltip = "Automatically purchases and equips the highest Pickaxe tier you can afford",
+})
+
+AutoProgressBox:AddCheckbox("AutoBuyTrail", {
+	Text = "Auto Buy Best Trail",
+	Default = false,
+	Tooltip = "Automatically purchases and equips the highest Trail tier you can afford",
+})
+
+AutoProgressBox:AddCheckbox("AutoUpgradePlot", {
+	Text = "Auto Upgrade Plot",
+	Default = false,
+	Tooltip = "Automatically upgrades your Plot / Pen when you have enough Cash and it is not at MAX",
+})
+
+AutoProgressBox:AddCheckbox("AutoUpgradeTreadmill", {
+	Text = "Auto Upgrade Treadmill",
+	Default = false,
+	Tooltip = "Automatically unlocks and upgrades your Plot Treadmill when you have enough Cash and it is not at MAX",
+})
+
+AutoProgressBox:AddDivider()
+
+AutoProgressBox:AddSlider("AutoProgressionInterval", {
+	Text = "Automation Check Interval",
+	Default = autoProgressionInterval,
+	Min = 3,
+	Max = 30,
+	Rounding = 0,
+	Suffix = "s",
+	Tooltip = "How often the automation checks your Cash and triggers affordable upgrades",
+})
+
+local AutoStatusBox = Tabs.Automation:AddGroupbox({
+	Side = "Right",
+	Name = "Live Progression Status",
+	IconName = "activity",
+	Description = "Real-time status of your equipment and plot upgrades.",
+})
+
+local AutoPetStatusLabel = AutoStatusBox:AddLabel("AutoPetStatusLabel", {
+	Text = "Best Pet: Off",
+	DoesWrap = true,
+})
+
+local AutoPickaxeStatusLabel = AutoStatusBox:AddLabel("AutoPickaxeStatusLabel", {
+	Text = "Pickaxe: Checking...",
+	DoesWrap = true,
+})
+
+local AutoTrailStatusLabel = AutoStatusBox:AddLabel("AutoTrailStatusLabel", {
+	Text = "Trail: Checking...",
+	DoesWrap = true,
+})
+
+local AutoPlotStatusLabel = AutoStatusBox:AddLabel("AutoPlotStatusLabel", {
+	Text = "Plot: Checking...",
+	DoesWrap = true,
+})
+
+local AutoTreadmillStatusLabel = AutoStatusBox:AddLabel("AutoTreadmillStatusLabel", {
+	Text = "Treadmill: Checking...",
+	DoesWrap = true,
+})
+
+--============================================================================--
+--// Tab 3: Visuals (Player ESP)
 --============================================================================--
 
 local EspMainBox = Tabs.Visuals:AddGroupbox({
@@ -1151,224 +1244,374 @@ WebhookBox:AddButton("Send Test Progress Webhook", function()
 	end
 end)
 
-WebhookBox:AddButton("Scan Automation Data to Webhook", function()
-	Library:Notify("Scanning game data for automation... Sending 4 reports to Discord.", 4)
-	task.spawn(function()
-		local function formatAttrs(inst)
-			local okA, attrs = pcall(function()
-				return inst:GetAttributes()
+--============================================================================--
+--// Safe Auto-Progression Engine (Pet, Pickaxe, Trail, Plot, Treadmill)
+--============================================================================--
+
+local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
+
+local function triggerGuiButton(btn)
+	if not btn or not (btn:IsA("TextButton") or btn:IsA("ImageButton")) then
+		return false
+	end
+	local fired = false
+	if typeof(firesignal) == "function" then
+		pcall(function()
+			firesignal(btn.Activated)
+			fired = true
+		end)
+		pcall(function()
+			firesignal(btn.MouseButton1Click)
+			fired = true
+		end)
+	end
+	local getconns = getconnections or get_signal_cons
+	if getconns then
+		for _, sig in ipairs({ btn.Activated, btn.MouseButton1Click, btn.MouseButton1Down }) do
+			pcall(function()
+				for _, conn in pairs(getconns(sig)) do
+					if conn.Fire then
+						conn:Fire()
+						fired = true
+					elseif conn.Function then
+						task.spawn(conn.Function)
+						fired = true
+					end
+				end
 			end)
-			if not okA or not attrs or next(attrs) == nil then
-				return ""
-			end
-			local parts = {}
-			for k, v in pairs(attrs) do
-				table.insert(parts, string.format("%s=%s", tostring(k), tostring(v)))
-			end
-			table.sort(parts)
-			return "{" .. table.concat(parts, ", ") .. "}"
 		end
+	end
+	return fired
+end
 
-		local function clampBlock(lines, maxChars)
-			local out = table.concat(lines, "\n")
-			if #out > maxChars then
-				out = out:sub(1, maxChars) .. "\n... (truncated)"
-			end
-			if out == "" then
-				out = "(none found)"
-			end
-			return "```text\n" .. out .. "\n```"
-		end
-
-		-- [1/4] Player Attributes & ReplicatedStorage Remotes/Modules
-		local lines1 = { "-- Player Attributes --" }
-		table.insert(lines1, "LocalPlayer Attrs: " .. formatAttrs(player))
-		for _, ch in ipairs(player:GetChildren()) do
-			if ch:IsA("ValueBase") then
-				table.insert(lines1, string.format("[PlayerVal] %s (%s) = %s", ch.Name, ch.ClassName, tostring(ch.Value)))
-			elseif ch.Name ~= "PlayerGui" and ch.Name ~= "PlayerScripts" and ch.Name ~= "Backpack" then
-				table.insert(lines1, string.format("[PlayerChild] %s (%s) %s", ch.Name, ch.ClassName, formatAttrs(ch)))
-				for _, sub in ipairs(ch:GetChildren()) do
-					if sub:IsA("ValueBase") then
-						table.insert(lines1, string.format("  .%s = %s", sub.Name, tostring(sub.Value)))
-					end
+local function parseOwnedTierSet(csvStr)
+	local set = {}
+	local maxTier = 0
+	if typeof(csvStr) == "number" then
+		set[csvStr] = true
+		return set, csvStr
+	end
+	if typeof(csvStr) == "string" then
+		for numStr in csvStr:gmatch("(%d+)") do
+			local n = tonumber(numStr)
+			if n then
+				set[n] = true
+				if n > maxTier then
+					maxTier = n
 				end
 			end
 		end
+	end
+	return set, maxTier
+end
 
-		table.insert(lines1, "\n-- ReplicatedStorage Remotes & Key Modules --")
-		local rs = game:GetService("ReplicatedStorage")
-		for _, desc in ipairs(rs:GetDescendants()) do
-			local relPath = desc:GetFullName():gsub("^ReplicatedStorage%.", "")
-			if desc:IsA("RemoteEvent") or desc:IsA("RemoteFunction") or desc:IsA("UnreliableRemoteEvent") or desc:IsA("BindableEvent") then
-				table.insert(lines1, string.format("[%s] %s %s", desc.ClassName, relPath, formatAttrs(desc)))
-			elseif desc:IsA("ModuleScript") then
-				local lower = relPath:lower()
-				if lower:find("pet") or lower:find("animal") or lower:find("pick") or lower:find("weapon") or lower:find("tool") or lower:find("trail") or lower:find("plot") or lower:find("tread") or lower:find("upgrade") or lower:find("shop") or lower:find("item") or lower:find("equip") then
-					table.insert(lines1, string.format("[Module] %s", relPath))
-				end
-			end
+local function findOwnedPlot()
+	local plotsFolder = workspace:FindFirstChild("Plots")
+	if not plotsFolder then
+		return nil
+	end
+	for _, plot in ipairs(plotsFolder:GetChildren()) do
+		if plot:GetAttribute("OwnerUserId") == player.UserId then
+			return plot
 		end
+	end
+	return nil
+end
 
-		postDiscordEmbed({
-			title = "[1/4] Automation Scan — Player Attrs & Remotes",
-			description = clampBlock(lines1, 3800),
-			color = 0x5865F2,
-		})
-		task.wait(0.7)
+local function readChildLabelText(parentInst, childName)
+	if not parentInst then
+		return ""
+	end
+	local ch = parentInst:FindFirstChild(childName)
+	if ch and (ch:IsA("TextLabel") or ch:IsA("TextButton")) then
+		return (ch.Text or ""):gsub("<[^>]+>", ""):match("^%s*(.-)%s*$") or ""
+	end
+	return ""
+end
 
-		-- [2/4] Plots, Treadmills & Workspace Prompts
-		local lines2 = { "-- Workspace Plots & Prompts --" }
-		local myRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-		local plotsFolder = workspace:FindFirstChild("Plots")
-		local targetPlot = nil
-		local closestDist = math.huge
+local lastEquipBestTime = 0
 
-		if plotsFolder then
-			for _, plot in ipairs(plotsFolder:GetChildren()) do
-				local aStr = formatAttrs(plot)
-				local pPos = plot:IsA("Model") and plot:GetPivot().Position or (plot:IsA("BasePart") and plot.Position) or nil
-				local d = (myRoot and pPos) and math.floor((pPos - myRoot.Position).Magnitude) or -1
-				table.insert(lines2, string.format("[Plot] %s (%s) [Dist: %dm] %s", plot.Name, plot.ClassName, d, aStr))
+local function runAutoProgressionStep(forceImmediate)
+	local rawCash = player:GetAttribute("Cash")
+	local currentCash = (typeof(rawCash) == "number" and rawCash) or parseAbbreviatedNumber(rawCash) or 0
+	local playerGui = player:FindFirstChild("PlayerGui")
+	local mainGui = playerGui and playerGui:FindFirstChild("MainGUI")
+	local framesFolder = mainGui and mainGui:FindFirstChild("Frames")
+	local myPlot = findOwnedPlot()
 
-				local ownerMatch = aStr:lower():find(player.Name:lower()) or aStr:find(tostring(player.UserId))
-				if not ownerMatch then
-					for _, desc in ipairs(plot:GetDescendants()) do
-						if desc:IsA("TextLabel") and desc.Text:lower():find(player.Name:lower()) then
-							ownerMatch = true
-							break
-						end
-					end
-				end
-				if ownerMatch then
-					targetPlot = plot
-					table.insert(lines2, "  --> MATCHED AS YOUR PLOT!")
-				elseif d >= 0 and d < closestDist then
-					closestDist = d
-					if not targetPlot then
-						targetPlot = plot
-					end
-				end
-			end
+	-- 1. Auto Equip Best Pet
+	if myPlot then
+		local placed = tonumber(myPlot:GetAttribute("AnimalsPlaced")) or 0
+		local maxPlaced = tonumber(myPlot:GetAttribute("MaxAnimals")) or 16
+		local plotCps = tonumber(myPlot:GetAttribute("CashPerSecond")) or 0
+		local basePetStatus = string.format("%d/%d placed ($%s/s)", placed, maxPlaced, formatAbbreviatedNumber(plotCps))
 
-			if targetPlot then
-				table.insert(lines2, "\n-- Detailed Dump of Plot: " .. targetPlot.Name .. " --")
-				for _, desc in ipairs(targetPlot:GetDescendants()) do
-					local rel = desc:GetFullName():gsub("^Workspace%.Plots%.", "")
-					local aStr = formatAttrs(desc)
-					if aStr ~= "" then
-						table.insert(lines2, string.format("[Attr] %s (%s) -> %s", rel, desc.ClassName, aStr))
-					end
-					if desc:IsA("ProximityPrompt") then
-						table.insert(lines2, string.format("[Prompt] %s -> Action=%q Object=%q Enabled=%s", rel, desc.ActionText, desc.ObjectText, tostring(desc.Enabled)))
-					elseif (desc:IsA("TextLabel") or desc:IsA("TextButton")) and desc.Text ~= "" then
-						local cleanT = desc.Text:gsub("<[^>]+>", ""):gsub("%s+", " ")
-						table.insert(lines2, string.format("[UI:%s] %s = %q", desc.ClassName, rel, cleanT))
-					end
-				end
-			end
-		end
-
-		table.insert(lines2, "\n-- Nearby / Shop Prompts in Workspace --")
-		for _, desc in ipairs(workspace:GetDescendants()) do
-			if desc:IsA("ProximityPrompt") then
-				local full = desc:GetFullName()
-				if not full:find("^Workspace%.Plots%.") then
-					local part = desc.Parent and desc.Parent:IsA("BasePart") and desc.Parent or nil
-					local d = (myRoot and part) and math.floor((part.Position - myRoot.Position).Magnitude) or -1
-					table.insert(lines2, string.format("[WS Prompt %dm] %s -> Action=%q Object=%q %s", d, full:gsub("^Workspace%.", ""), desc.ActionText, desc.ObjectText, desc.Parent and formatAttrs(desc.Parent) or ""))
-				end
-			end
-		end
-
-		postDiscordEmbed({
-			title = "[2/4] Automation Scan — Plot, Treadmill & Prompts",
-			description = clampBlock(lines2, 3800),
-			color = 0xFEE75C,
-		})
-		task.wait(0.7)
-
-		-- [3/4] PlayerGui: Pets / Equip Best / Plot / Treadmill Upgrade UI
-		local lines3 = { "-- PlayerGui: Pets, Equip Best, Plot & Treadmill --" }
-		local playerGui = player:FindFirstChild("PlayerGui")
-		if playerGui then
-			for _, sg in ipairs(playerGui:GetChildren()) do
-				if sg:IsA("ScreenGui") and sg.Name ~= "RobloxGui" and sg.Name ~= "Alexandria" then
-					table.insert(lines3, string.format("[ScreenGui] %s (Enabled=%s)", sg.Name, tostring(sg.Enabled)))
-				end
-			end
-			for _, desc in ipairs(playerGui:GetDescendants()) do
-				local rel = desc:GetFullName():gsub("^Players%.[^%.]+%.PlayerGui%.", "")
-				if not rel:find("^RobloxGui") and not rel:find("^Alexandria") then
-					local low = rel:lower()
-					local txt = (desc:IsA("TextLabel") or desc:IsA("TextButton") or desc:IsA("TextBox")) and (desc.Text or ""):gsub("<[^>]+>", ""):gsub("%s+", " ") or ""
-					local txtLow = txt:lower()
-					local aStr = formatAttrs(desc)
-
-					local isPetOrUpgrade = low:find("equip") or low:find("best") or low:find("pet") or low:find("animal")
-						or low:find("tread") or low:find("thread") or low:find("plot") or low:find("upgrade")
-						or txtLow:find("equip") or txtLow:find("best") or txtLow:find("treadmill") or txtLow:find("upgrade")
-
-					if isPetOrUpgrade then
+		if autoEquipBestPetEnabled then
+			local now = os.clock()
+			if forceImmediate or (now - lastEquipBestTime) >= math.max(autoProgressionInterval, 10) then
+				lastEquipBestTime = now
+				local equipBestBtn = nil
+				if playerGui then
+					for _, desc in ipairs(playerGui:GetDescendants()) do
 						if desc:IsA("TextButton") or desc:IsA("ImageButton") then
-							table.insert(lines3, string.format("[BTN:%s] %s | Text=%q %s", desc.ClassName, rel, txt, aStr))
-						elseif desc:IsA("TextLabel") and txt ~= "" and #txt < 80 then
-							table.insert(lines3, string.format("[LBL] %s = %q %s", rel, txt, aStr))
-						elseif aStr ~= "" then
-							table.insert(lines3, string.format("[UI:%s] %s %s", desc.ClassName, rel, aStr))
+							local rel = desc:GetFullName()
+							if not rel:find("RobloxGui") and not rel:find("Alexandria") then
+								local nLow = desc.Name:lower()
+								local tLow = (desc:IsA("TextButton") and desc.Text or ""):lower()
+								if not tLow or tLow == "" then
+									local subLbl = desc:FindFirstChildWhichIsA("TextLabel", true)
+									if subLbl then
+										tLow = (subLbl.Text or ""):lower()
+									end
+								end
+								if nLow == "equipbest" or nLow == "equipbestbutton" or tLow:find("equip best") or tLow:find("best pet") then
+									equipBestBtn = desc
+									break
+								end
+							end
 						end
 					end
 				end
-			end
-		end
-
-		postDiscordEmbed({
-			title = "[3/4] Automation Scan — Pet Equip & Upgrade UI",
-			description = clampBlock(lines3, 3800),
-			color = 0x57F287,
-		})
-		task.wait(0.7)
-
-		-- [4/4] PlayerGui: Pickaxe (Diamond Shop) & Trails Shop UI
-		local lines4 = { "-- PlayerGui: Pickaxe / Weapon / Diamond / Trail Shops --" }
-		if playerGui then
-			for _, desc in ipairs(playerGui:GetDescendants()) do
-				local rel = desc:GetFullName():gsub("^Players%.[^%.]+%.PlayerGui%.", "")
-				if not rel:find("^RobloxGui") and not rel:find("^Alexandria") then
-					local low = rel:lower()
-					local txt = (desc:IsA("TextLabel") or desc:IsA("TextButton") or desc:IsA("TextBox")) and (desc.Text or ""):gsub("<[^>]+>", ""):gsub("%s+", " ") or ""
-					local txtLow = txt:lower()
-					local aStr = formatAttrs(desc)
-
-					local isShopRelated = low:find("pick") or low:find("weapon") or low:find("tool") or low:find("hammer") or low:find("bat")
-						or low:find("trail") or low:find("diamond") or low:find("shop") or low:find("store") or low:find("buy")
-						or txtLow:find("pickaxe") or txtLow:find("trail") or txtLow:find("diamond") or txtLow:find("buy")
-
-					if isShopRelated then
-						if desc:IsA("TextButton") or desc:IsA("ImageButton") then
-							table.insert(lines4, string.format("[BTN:%s] %s | Text=%q %s", desc.ClassName, rel, txt, aStr))
-						elseif desc:IsA("TextLabel") and txt ~= "" and #txt < 80 then
-							table.insert(lines4, string.format("[LBL] %s = %q %s", rel, txt, aStr))
-						elseif aStr ~= "" then
-							table.insert(lines4, string.format("[UI:%s] %s %s", desc.ClassName, rel, aStr))
-						end
-					end
+				if equipBestBtn then
+					triggerGuiButton(equipBestBtn)
+					AutoPetStatusLabel:SetText("Best Pet: Active · " .. basePetStatus)
+				else
+					AutoPetStatusLabel:SetText("Best Pet: Monitoring · " .. basePetStatus)
 				end
+			else
+				AutoPetStatusLabel:SetText("Best Pet: Active · " .. basePetStatus)
 			end
-		end
-
-		local okFinal, errFinal = postDiscordEmbed({
-			title = "[4/4] Automation Scan — Pickaxe & Trail Shop UI",
-			description = clampBlock(lines4, 3800),
-			color = 0xEB459E,
-		})
-
-		if okFinal then
-			Library:Notify("All 4 Automation Scan embeds sent to Discord!", 4)
 		else
-			Library:Notify("Scan failed: " .. tostring(errFinal), 4)
+			AutoPetStatusLabel:SetText("Best Pet: Off (" .. basePetStatus .. ")")
 		end
-	end)
+	else
+		AutoPetStatusLabel:SetText(autoEquipBestPetEnabled and "Best Pet: Waiting for plot..." or "Best Pet: Off")
+	end
+
+	-- 2. Auto Buy & Equip Best Pickaxe
+	local equippedPickaxe = tonumber(player:GetAttribute("PickaxeTier")) or 1
+	local ownedPickaxesSet, maxOwnedPickaxe = parseOwnedTierSet(player:GetAttribute("OwnedPickaxes"))
+	if maxOwnedPickaxe < equippedPickaxe then
+		maxOwnedPickaxe = equippedPickaxe
+	end
+
+	local pickaxesFrame = framesFolder and framesFolder:FindFirstChild("Pickaxes")
+	local pickaxeScroll = pickaxesFrame and pickaxesFrame:FindFirstChild("ScrollingFrame")
+	if pickaxeScroll then
+		local bestAffordableTier = nil
+		local bestAffordableBtn = nil
+		local bestAffordableCost = 0
+		local highestOwnedEquipBtn = nil
+
+		for _, child in ipairs(pickaxeScroll:GetChildren()) do
+			local tierNum = tonumber(child.Name:match("^Tier(%d+)$"))
+			local container = tierNum and child:FindFirstChild("Container")
+			if tierNum and container then
+				if tierNum == maxOwnedPickaxe and maxOwnedPickaxe > equippedPickaxe then
+					local eqBtn = container:FindFirstChild("Equip")
+					if eqBtn then
+						highestOwnedEquipBtn = eqBtn
+					end
+				end
+				if not ownedPickaxesSet[tierNum] then
+					local purchaseBtn = container:FindFirstChild("Purchase")
+					local costTitle = purchaseBtn and readChildLabelText(purchaseBtn, "Title") or ""
+					local costNum = parseAbbreviatedNumber(costTitle)
+					if purchaseBtn and costNum and costNum > 0 and currentCash >= costNum then
+						if not bestAffordableTier or tierNum > bestAffordableTier then
+							bestAffordableTier = tierNum
+							bestAffordableBtn = purchaseBtn
+							bestAffordableCost = costNum
+						end
+					end
+				end
+			end
+		end
+
+		if autoBuyPickaxeEnabled then
+			if bestAffordableBtn and bestAffordableTier then
+				triggerGuiButton(bestAffordableBtn)
+				local req = ReplicatedStorage:FindFirstChild("PickaxeShopRequest")
+				if req and req:IsA("RemoteEvent") then
+					pcall(function()
+						req:FireServer("Purchase", bestAffordableTier)
+					end)
+				end
+				AutoPickaxeStatusLabel:SetText(string.format("Pickaxe: Buying Tier %d ($%s)", bestAffordableTier, formatAbbreviatedNumber(bestAffordableCost)))
+			elseif highestOwnedEquipBtn and maxOwnedPickaxe > equippedPickaxe then
+				triggerGuiButton(highestOwnedEquipBtn)
+				local req = ReplicatedStorage:FindFirstChild("PickaxeShopRequest")
+				if req and req:IsA("RemoteEvent") then
+					pcall(function()
+						req:FireServer("Equip", maxOwnedPickaxe)
+					end)
+				end
+				AutoPickaxeStatusLabel:SetText(string.format("Pickaxe: Equipping Tier %d", maxOwnedPickaxe))
+			else
+				AutoPickaxeStatusLabel:SetText(string.format("Pickaxe: Tier %d Equipped (Max Owned: %d)", equippedPickaxe, maxOwnedPickaxe))
+			end
+		else
+			AutoPickaxeStatusLabel:SetText(string.format("Pickaxe: Tier %d (Auto Off)", equippedPickaxe))
+		end
+	else
+		AutoPickaxeStatusLabel:SetText(string.format("Pickaxe: Tier %d", equippedPickaxe))
+	end
+
+	-- 3. Auto Buy & Equip Best Trail
+	local equippedTrail = tonumber(player:GetAttribute("EquippedTrail")) or 0
+	local ownedTrailsSet, maxOwnedTrail = parseOwnedTierSet(player:GetAttribute("OwnedTrails"))
+	if maxOwnedTrail < equippedTrail then
+		maxOwnedTrail = equippedTrail
+	end
+
+	local trailsFrame = framesFolder and (
+		framesFolder:FindFirstChild("Trails")
+		or framesFolder:FindFirstChild("SpeedShop")
+		or framesFolder:FindFirstChild("TrailShop")
+		or framesFolder:FindFirstChild("Trail")
+	)
+	local trailScroll = trailsFrame and trailsFrame:FindFirstChild("ScrollingFrame")
+	if trailScroll then
+		local bestTrailTier = nil
+		local bestTrailBtn = nil
+		local bestTrailCost = 0
+		local highestTrailEquipBtn = nil
+
+		for _, child in ipairs(trailScroll:GetChildren()) do
+			local tierNum = tonumber(child.Name:match("^Tier(%d+)$"))
+			local container = tierNum and child:FindFirstChild("Container")
+			if tierNum and container then
+				if tierNum == maxOwnedTrail and maxOwnedTrail > equippedTrail then
+					local eqBtn = container:FindFirstChild("Equip")
+					if eqBtn then
+						highestTrailEquipBtn = eqBtn
+					end
+				end
+				if not ownedTrailsSet[tierNum] then
+					local purchaseBtn = container:FindFirstChild("Purchase")
+					local costTitle = purchaseBtn and (readChildLabelText(purchaseBtn, "Title") ~= "" and readChildLabelText(purchaseBtn, "Title") or readChildLabelText(purchaseBtn, "Price")) or ""
+					local costNum = parseAbbreviatedNumber(costTitle)
+					if purchaseBtn and costNum and costNum > 0 and currentCash >= costNum then
+						if not bestTrailTier or tierNum > bestTrailTier then
+							bestTrailTier = tierNum
+							bestTrailBtn = purchaseBtn
+							bestTrailCost = costNum
+						end
+					end
+				end
+			end
+		end
+
+		if autoBuyTrailEnabled then
+			if bestTrailBtn and bestTrailTier then
+				triggerGuiButton(bestTrailBtn)
+				local req = ReplicatedStorage:FindFirstChild("TrailShopRequest")
+				if req and req:IsA("RemoteEvent") then
+					pcall(function()
+						req:FireServer("Purchase", bestTrailTier)
+					end)
+				end
+				AutoTrailStatusLabel:SetText(string.format("Trail: Buying Tier %d ($%s)", bestTrailTier, formatAbbreviatedNumber(bestTrailCost)))
+			elseif highestTrailEquipBtn and maxOwnedTrail > equippedTrail then
+				triggerGuiButton(highestTrailEquipBtn)
+				local req = ReplicatedStorage:FindFirstChild("TrailShopRequest")
+				if req and req:IsA("RemoteEvent") then
+					pcall(function()
+						req:FireServer("Equip", maxOwnedTrail)
+					end)
+				end
+				AutoTrailStatusLabel:SetText(string.format("Trail: Equipping Tier %d", maxOwnedTrail))
+			else
+				AutoTrailStatusLabel:SetText(string.format("Trail: Tier %d Equipped (Max Owned: %d)", equippedTrail, maxOwnedTrail))
+			end
+		else
+			AutoTrailStatusLabel:SetText(string.format("Trail: Tier %d (Auto Off)", equippedTrail))
+		end
+	else
+		AutoTrailStatusLabel:SetText(string.format("Trail: Tier %d (Max Owned: %d)", equippedTrail, maxOwnedTrail))
+	end
+
+	-- 4. Auto Upgrade Plot
+	local upgradeBoard = playerGui and playerGui:FindFirstChild("UpgradeBoardGui")
+	local plotLevelText = upgradeBoard and readChildLabelText(upgradeBoard, "Level") or ""
+	local plotPurchaseBtn = upgradeBoard and upgradeBoard:FindFirstChild("Purchase")
+	local plotPriceText = plotPurchaseBtn and readChildLabelText(plotPurchaseBtn, "Price") or ""
+
+	if plotLevelText == "" and myPlot then
+		plotLevelText = "Lv. " .. tostring(myPlot:GetAttribute("PlotLevel") or "?")
+	end
+
+	local isPlotMax = plotLevelText:upper():find("MAX") ~= nil or plotPriceText:upper():find("MAX") ~= nil
+	if isPlotMax then
+		AutoPlotStatusLabel:SetText("Plot: " .. (plotLevelText ~= "" and plotLevelText or "MAX"))
+	else
+		local plotCost = parseAbbreviatedNumber(plotPriceText)
+		if autoUpgradePlotEnabled and plotCost and plotCost > 0 and currentCash >= plotCost then
+			if plotPurchaseBtn then
+				triggerGuiButton(plotPurchaseBtn)
+			end
+			local req = ReplicatedStorage:FindFirstChild("UpgradePlotRequest")
+			if req and req:IsA("RemoteEvent") then
+				pcall(function()
+					req:FireServer()
+				end)
+			end
+			AutoPlotStatusLabel:SetText(string.format("Plot: Upgrading! (%s · %s)", plotLevelText, plotPriceText))
+		else
+			local suffix = plotPriceText ~= "" and (" · Next: " .. plotPriceText) or ""
+			AutoPlotStatusLabel:SetText("Plot: " .. (plotLevelText ~= "" and plotLevelText or "Unknown") .. suffix)
+		end
+	end
+
+	-- 5. Auto Upgrade Treadmill
+	local treadBoard = playerGui and playerGui:FindFirstChild("TreadmillBoardGui")
+	local treadLevelText = treadBoard and readChildLabelText(treadBoard, "Level") or ""
+	local treadPurchaseBtn = treadBoard and treadBoard:FindFirstChild("Purchase")
+	local treadPriceText = treadPurchaseBtn and readChildLabelText(treadPurchaseBtn, "Price") or ""
+	local treadUnlocked = myPlot and (myPlot:GetAttribute("TreadmillUnlocked") == true)
+
+	if treadLevelText == "" and myPlot then
+		treadLevelText = "Lv. " .. tostring(myPlot:GetAttribute("TreadmillLevel") or "?")
+	end
+
+	local isTreadMax = treadLevelText:upper():find("MAX") ~= nil or treadPriceText:upper():find("MAX") ~= nil
+	if isTreadMax then
+		AutoTreadmillStatusLabel:SetText("Treadmill: " .. (treadLevelText ~= "" and treadLevelText or "MAX"))
+	else
+		local treadCost = parseAbbreviatedNumber(treadPriceText)
+		if autoUpgradeTreadmillEnabled and treadCost and treadCost > 0 and currentCash >= treadCost then
+			if treadPurchaseBtn then
+				triggerGuiButton(treadPurchaseBtn)
+			end
+			local reqName = (myPlot and not treadUnlocked) and "UnlockTreadmillRequest" or "UpgradeTreadmillRequest"
+			local req = ReplicatedStorage:FindFirstChild(reqName)
+			if req and req:IsA("RemoteEvent") then
+				pcall(function()
+					req:FireServer()
+				end)
+			end
+			AutoTreadmillStatusLabel:SetText(string.format("Treadmill: Upgrading! (%s · %s)", treadLevelText, treadPriceText))
+		else
+			local suffix = treadPriceText ~= "" and (" · Next: " .. treadPriceText) or ""
+			AutoTreadmillStatusLabel:SetText("Treadmill: " .. (treadLevelText ~= "" and treadLevelText or "Unknown") .. suffix)
+		end
+	end
+end
+
+AutoProgressBox:AddButton("Run Automation Check Now", function()
+	pcall(runAutoProgressionStep, true)
+	Library:Notify("Ran automation check!", 2)
+end)
+
+task.spawn(function()
+	while not Library.Unloaded do
+		pcall(runAutoProgressionStep, false)
+		local waitSecs = math.clamp(tonumber(autoProgressionInterval) or 6, 3, 30)
+		local startWait = os.clock()
+		while not Library.Unloaded and (os.clock() - startWait) < waitSecs do
+			task.wait(0.5)
+		end
+	end
 end)
 
 --============================================================================--
@@ -3206,12 +3449,48 @@ Options.RarePetMinCash:OnChanged(function(Value)
 	autoSaveActiveConfig()
 end)
 
+Toggles.AutoEquipBestPet:OnChanged(function(Value)
+	autoEquipBestPetEnabled = Value
+	pcall(runAutoProgressionStep, Value)
+	autoSaveActiveConfig()
+end)
+
+Toggles.AutoBuyPickaxe:OnChanged(function(Value)
+	autoBuyPickaxeEnabled = Value
+	pcall(runAutoProgressionStep, Value)
+	autoSaveActiveConfig()
+end)
+
+Toggles.AutoBuyTrail:OnChanged(function(Value)
+	autoBuyTrailEnabled = Value
+	pcall(runAutoProgressionStep, Value)
+	autoSaveActiveConfig()
+end)
+
+Toggles.AutoUpgradePlot:OnChanged(function(Value)
+	autoUpgradePlotEnabled = Value
+	pcall(runAutoProgressionStep, Value)
+	autoSaveActiveConfig()
+end)
+
+Toggles.AutoUpgradeTreadmill:OnChanged(function(Value)
+	autoUpgradeTreadmillEnabled = Value
+	pcall(runAutoProgressionStep, Value)
+	autoSaveActiveConfig()
+end)
+
+Options.AutoProgressionInterval:OnChanged(function(Value)
+	autoProgressionInterval = Value
+	autoSaveActiveConfig()
+end)
+
 --// Load Autoload Config on Startup \\--
 SaveManager:LoadAutoloadConfig()
 task.delay(0.6, function()
 	isInitializingConfig = false
 	pcall(collectProgressSnapshot, false)
 	pcall(scanGroundPetsAndAlerts)
+	pcall(runAutoProgressionStep, false)
 	if shared.__AllainReconnected and webhookNotifyEvents then
 		shared.__AllainReconnected = nil
 		sendEventWebhook(
