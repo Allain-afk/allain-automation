@@ -2528,76 +2528,95 @@ do
 						end
 
 						local reachThreshold = math.clamp(tonumber(autoFarmReach) or 7, 4, 15)
-						local delta = bestEgg.Position - rootPart.Position
-						local flatDelta = Vector3.new(delta.X, 0, delta.Z)
-						local flatDist = flatDelta.Magnitude
+						local moveTargetPos = Vector3.new(bestEgg.Position.X, rootPart.Position.Y, bestEgg.Position.Z)
+						local flatDist = (moveTargetPos - rootPart.Position).Magnitude
 
 						if flatDist > reachThreshold then
-							-- Move toward egg at full character speed using directional vector input
 							if AutoFarmStateLabel then
 								AutoFarmStateLabel:SetText(string.format("Farm State: Running to egg (%dm)", math.floor(flatDist + 0.5)))
 							end
 
-							-- Direct humanoid:Move runs at 100% of real in-game WalkSpeed (e.g. 234 studs/s) without MoveTo stutter!
-							local moveDir = flatDelta.Unit
-							humanoid:Move(moveDir, false)
-
-							-- Face target egg smoothly while running
-							pcall(function()
-								rootPart.CFrame = CFrame.new(rootPart.Position, Vector3.new(bestEgg.Position.X, rootPart.Position.Y, bestEgg.Position.Z))
-							end)
-
-							-- Unstuck detection
-							if not lastStuckPos or (rootPart.Position - lastStuckPos).Magnitude > 2 then
-								lastStuckPos = rootPart.Position
-								lastStuckTime = os.clock()
-							elseif (os.clock() - lastStuckTime) > 1.8 then
-								humanoid.Jump = true
-								lastStuckTime = os.clock()
-							end
-
-							task.wait(0.05)
-						else
-							-- In range! Immediately halt movement so character stays right at the egg
-							humanoid:Move(Vector3.zero, false)
-							if AutoFarmStateLabel then
-								AutoFarmStateLabel:SetText("Farm State: In Range (Auto-Swinging...)")
-							end
+							-- Issue MoveTo ONCE so Roblox accelerates to full 234+ WalkSpeed without stutter!
+							humanoid:MoveTo(moveTargetPos)
+							local lastMoveIssueTime = os.clock()
 							lastStuckPos = rootPart.Position
 							lastStuckTime = os.clock()
 
-							-- Wait while in-game auto swing breaks the egg
+							while autoFarmEnabled and not Library.Unloaded and bestEgg.Parent do
+								local curFlatDist = Vector3.new(bestEgg.Position.X - rootPart.Position.X, 0, bestEgg.Position.Z - rootPart.Position.Z).Magnitude
+								if curFlatDist <= reachThreshold then
+									break
+								end
+
+								-- Check if egg was broken by another player or despawned while walking
+								if bestEgg:GetAttribute("Broken") == true then
+									break
+								end
+								local hpCheck = tonumber(bestEgg:GetAttribute("Health"))
+								if hpCheck and hpCheck <= 0 then
+									break
+								end
+
+								-- Unstuck handling
+								if (rootPart.Position - lastStuckPos).Magnitude > 2 then
+									lastStuckPos = rootPart.Position
+									lastStuckTime = os.clock()
+								elseif (os.clock() - lastStuckTime) > 2.0 then
+									humanoid.Jump = true
+									humanoid:MoveTo(moveTargetPos)
+									lastStuckPos = rootPart.Position
+									lastStuckTime = os.clock()
+									lastMoveIssueTime = os.clock()
+								end
+
+								-- Re-issue MoveTo only if 4 seconds passed (avoids Roblox 8s timeout without stuttering)
+								if (os.clock() - lastMoveIssueTime) > 4.0 then
+									humanoid:MoveTo(moveTargetPos)
+									lastMoveIssueTime = os.clock()
+								end
+
+								task.wait(0.05)
+							end
+						end
+
+						-- Within reach of egg
+						local curDist = (bestEgg.Position - rootPart.Position).Magnitude
+						if curDist <= (reachThreshold + 2) and bestEgg.Parent and bestEgg:GetAttribute("Broken") ~= true then
+							-- Halt movement right in front of egg
+							humanoid:MoveTo(rootPart.Position)
+							if AutoFarmStateLabel then
+								AutoFarmStateLabel:SetText("Farm State: In Range (Auto-Swinging...)")
+							end
+
+							-- Wait while in-game native Auto Swing breaks the egg
 							while autoFarmEnabled and not Library.Unloaded and bestEgg.Parent do
 								local broken = bestEgg:GetAttribute("Broken") == true
 								local hpNow = tonumber(bestEgg:GetAttribute("Health"))
 								if broken or (hpNow and hpNow <= 0) then
 									break
 								end
-								local curDist = (bestEgg.Position - rootPart.Position).Magnitude
-								if curDist > (reachThreshold + 3) then
+								local checkDist = (bestEgg.Position - rootPart.Position).Magnitude
+								if checkDist > (reachThreshold + 4) then
 									break
 								end
 								task.wait(0.08)
 							end
+						end
 
-							-- Stop moving when egg breaks
-							humanoid:Move(Vector3.zero, false)
-
-							-- Egg broken or removed!
-							if not bestEgg.Parent or bestEgg:GetAttribute("Broken") == true or (tonumber(bestEgg:GetAttribute("Health")) or 0) <= 0 then
-								sessionEggsBroken += 1
-								if AutoFarmStatsLabel then
-									AutoFarmStatsLabel:SetText("Eggs Broken: " .. tostring(sessionEggsBroken))
-								end
-								if AutoFarmTargetLabel then
-									AutoFarmTargetLabel:SetText("Target: Egg broken! Finding next...")
-								end
-								task.wait(0.1)
+						-- Egg broken or removed!
+						if not bestEgg.Parent or bestEgg:GetAttribute("Broken") == true or (tonumber(bestEgg:GetAttribute("Health")) or 0) <= 0 then
+							sessionEggsBroken += 1
+							if AutoFarmStatsLabel then
+								AutoFarmStatsLabel:SetText("Eggs Broken: " .. tostring(sessionEggsBroken))
 							end
+							if AutoFarmTargetLabel then
+								AutoFarmTargetLabel:SetText("Target: Egg broken! Finding next...")
+							end
+							task.wait(0.1)
 						end
 					else
 						activeFarmTargetEgg = nil
-						humanoid:Move(Vector3.zero, false)
+						humanoid:MoveTo(rootPart.Position)
 						if AutoFarmTargetLabel then
 							AutoFarmTargetLabel:SetText("Target: None found in selected zone")
 						end
@@ -2609,9 +2628,6 @@ do
 				end
 			else
 				activeFarmTargetEgg = nil
-				if character and humanoid then
-					humanoid:Move(Vector3.zero, false)
-				end
 				task.wait(0.4)
 			end
 		end
@@ -4203,8 +4219,9 @@ Toggles.AutoFarmEnabled:OnChanged(function(Value)
 		pcall(function()
 			local char = player.Character
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
-			if hum then
-				hum:Move(Vector3.zero, false)
+			local root = char and char:FindFirstChild("HumanoidRootPart")
+			if hum and root then
+				hum:MoveTo(root.Position)
 			end
 		end)
 		if AutoFarmStateLabel then
