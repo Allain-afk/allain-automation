@@ -71,6 +71,7 @@ local webhookHeartbeatEnabled = false
 local webhookIntervalMin = 20
 
 local espEnabled = false
+local espUniqueColors = true
 local espHighlightEnabled = true
 local espBillboardEnabled = true
 local espColor = Color3.fromRGB(110, 175, 255)
@@ -405,6 +406,12 @@ EspMainBox:AddCheckbox("EspEnabled", {
 		Default = espColor,
 		Title = "ESP Color",
 	})
+
+EspMainBox:AddCheckbox("EspUniqueColors", {
+	Text = "Unique Color per Player",
+	Default = true,
+	Tooltip = "Gives every player in the server a distinct highlight & tag color so overlapping tags are easy to tell apart",
+})
 
 EspMainBox:AddCheckbox("EspHighlight", {
 	Text = "Player Highlight (Chams)",
@@ -1498,9 +1505,39 @@ local function getTargetPlayerStatSummary(targetPlayer)
 	return table.concat(parts, " · ")
 end
 
+local playerColorPalette = {
+	Color3.fromRGB(85, 225, 255),  -- Cyan
+	Color3.fromRGB(255, 105, 115), -- Coral Red
+	Color3.fromRGB(115, 245, 130), -- Lime Green
+	Color3.fromRGB(255, 215, 75),  -- Gold Yellow
+	Color3.fromRGB(195, 125, 255), -- Violet Purple
+	Color3.fromRGB(255, 145, 65),  -- Tangerine Orange
+	Color3.fromRGB(255, 110, 210), -- Hot Pink
+	Color3.fromRGB(95, 255, 205),  -- Mint Aqua
+	Color3.fromRGB(120, 165, 255), -- Sky Blue
+	Color3.fromRGB(235, 255, 105), -- Chartreuse
+	Color3.fromRGB(255, 160, 175), -- Rose Peach
+	Color3.fromRGB(165, 225, 255), -- Ice Blue
+}
+local usedPaletteIndices = {}
+
+local function allocateDistinctPlayerColor(targetPlayer)
+	for i, col in ipairs(playerColorPalette) do
+		if not usedPaletteIndices[i] then
+			usedPaletteIndices[i] = targetPlayer
+			return col, i
+		end
+	end
+	local fallbackIdx = ((targetPlayer.UserId or 1) % #playerColorPalette) + 1
+	return playerColorPalette[fallbackIdx], nil
+end
+
 local function removePlayerEsp(targetPlayer)
 	local entry = espObjects[targetPlayer]
 	if entry then
+		if entry.PaletteIndex and usedPaletteIndices[entry.PaletteIndex] == targetPlayer then
+			usedPaletteIndices[entry.PaletteIndex] = nil
+		end
 		pcall(function()
 			if entry.Highlight then
 				entry.Highlight:Destroy()
@@ -1518,6 +1555,8 @@ local function createOrGetPlayerEsp(targetPlayer)
 	if entry then
 		return entry
 	end
+
+	local assignedColor, paletteIdx = allocateDistinctPlayerColor(targetPlayer)
 
 	local highlight = Instance.new("Highlight")
 	highlight.Name = "ESP_HL_" .. targetPlayer.Name
@@ -1540,7 +1579,7 @@ local function createOrGetPlayerEsp(targetPlayer)
 	textLabel.BackgroundTransparency = 1
 	textLabel.FontFace = Library.Scheme.Font or Font.fromEnum(Enum.Font.GothamBold)
 	textLabel.TextSize = espTextSize
-	textLabel.TextColor3 = espColor
+	textLabel.TextColor3 = assignedColor
 	textLabel.TextStrokeTransparency = 0.25
 	textLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
 	textLabel.TextYAlignment = Enum.TextYAlignment.Bottom
@@ -1551,6 +1590,8 @@ local function createOrGetPlayerEsp(targetPlayer)
 		Highlight = highlight,
 		Billboard = billboard,
 		Label = textLabel,
+		AssignedColor = assignedColor,
+		PaletteIndex = paletteIdx,
 	}
 	espObjects[targetPlayer] = entry
 	return entry
@@ -1583,12 +1624,13 @@ local function updateAllEsp()
 				local dist = myRoot and (rootPart.Position - myRoot.Position).Magnitude or 0
 				if dist <= espMaxDistance then
 					local entry = createOrGetPlayerEsp(targetPlayer)
+					local playerColor = (espUniqueColors and entry.AssignedColor) or espColor
 
 					-- Update Highlight
 					if espHighlightEnabled then
 						entry.Highlight.Adornee = char
-						entry.Highlight.FillColor = espColor
-						entry.Highlight.OutlineColor = espColor
+						entry.Highlight.FillColor = playerColor
+						entry.Highlight.OutlineColor = playerColor
 						entry.Highlight.FillTransparency = espFillTrans
 						entry.Highlight.OutlineTransparency = espOutlineTrans
 						entry.Highlight.Enabled = true
@@ -1628,7 +1670,7 @@ local function updateAllEsp()
 
 						if #lines > 0 then
 							entry.Billboard.Adornee = head
-							entry.Label.TextColor3 = espColor
+							entry.Label.TextColor3 = playerColor
 							entry.Label.TextSize = espTextSize
 							entry.Label.Text = table.concat(lines, "\n")
 							entry.Billboard.Enabled = true
@@ -2739,6 +2781,12 @@ end)
 
 Options.EspColor:OnChanged(function(Value)
 	espColor = Value
+	pcall(updateAllEsp)
+	autoSaveActiveConfig()
+end)
+
+Toggles.EspUniqueColors:OnChanged(function(Value)
+	espUniqueColors = Value
 	pcall(updateAllEsp)
 	autoSaveActiveConfig()
 end)
