@@ -188,8 +188,10 @@ local autoFarmEggsSelected = {}
 local autoFarmPriority = "Closest Egg"
 local autoFarmMinLuck = 0
 local autoFarmReach = 7
+local autoFarmSpeed = 0
 local sessionEggsBroken = 0
 local activeFarmTargetEgg = nil
+local restoreNativeWalkSpeed = nil
 
 local anchorPosition = nil
 local sessionStartTime = os.clock()
@@ -590,6 +592,16 @@ do
 		Rounding = 1,
 		Suffix = " studs",
 		Tooltip = "Distance to stop from the egg so in-game Auto Swing engages",
+	})
+
+	AutoFarmBox:AddSlider("AutoFarmSpeed", {
+		Text = "Auto-Farm Speed Limit",
+		Default = autoFarmSpeed,
+		Min = 0,
+		Max = 150,
+		Rounding = 0,
+		Suffix = " studs/s",
+		Tooltip = "Adjusts farming run speed from 0 to 150 studs/s (0 = Full Native Speed). Never exceeds your legitimate in-game speed (173 unmounted / 234 mounted).",
 	})
 
 	AutoFarmBox:AddDivider()
@@ -2292,6 +2304,61 @@ do
 	local registeredEggTypes = {}
 	local registeredZones = {}
 
+	local lastLegitMountedSpeed = 234.1
+	local lastLegitUnmountedSpeed = 173.4
+
+	local function getLegitMaxSpeed(humanoid)
+		local isMounted = player:GetAttribute("Mounted") == true
+		if humanoid and humanoid.Parent and humanoid.Health > 0 then
+			local cur = humanoid.WalkSpeed
+			if cur > 150 then
+				if isMounted then
+					lastLegitMountedSpeed = cur
+				else
+					lastLegitUnmountedSpeed = cur
+				end
+				return cur
+			end
+		end
+		return isMounted and lastLegitMountedSpeed or lastLegitUnmountedSpeed
+	end
+
+	local function restoreLegitSpeed(humanoid)
+		if humanoid and humanoid.Parent and humanoid.Health > 0 then
+			local target = getLegitMaxSpeed(humanoid)
+			if math.abs(humanoid.WalkSpeed - target) > 0.5 then
+				humanoid.WalkSpeed = target
+			end
+		end
+	end
+
+	restoreNativeWalkSpeed = function()
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum then
+			restoreLegitSpeed(hum)
+		end
+	end
+
+	pcall(function()
+		player:GetAttributeChangedSignal("Mounted"):Connect(function()
+			local isMounted = player:GetAttribute("Mounted") == true
+			task.delay(0.1, function()
+				pcall(function()
+					local char = player.Character
+					local hum = char and char:FindFirstChildOfClass("Humanoid")
+					if hum and hum.WalkSpeed > 150 then
+						if isMounted then
+							lastLegitMountedSpeed = hum.WalkSpeed
+						else
+							lastLegitUnmountedSpeed = hum.WalkSpeed
+						end
+					end
+				end)
+			end)
+		end)
+	end)
+
 	local function getCleanEggName(eggPart)
 		local rawName = eggPart:GetAttribute("EggInfoName") or eggPart:GetAttribute("EggType")
 		if not rawName or rawName == "" then
@@ -2532,11 +2599,20 @@ do
 						local flatDist = (moveTargetPos - rootPart.Position).Magnitude
 
 						if flatDist > reachThreshold then
-							if AutoFarmStateLabel then
-								AutoFarmStateLabel:SetText(string.format("Farm State: Running to egg (%dm)", math.floor(flatDist + 0.5)))
+							-- 1. Apply speed regulation before starting movement
+							local legitMax = getLegitMaxSpeed(humanoid)
+							local desiredSpeed = (autoFarmSpeed > 0) and math.clamp(autoFarmSpeed, 16, legitMax) or legitMax
+							if math.abs(humanoid.WalkSpeed - desiredSpeed) > 0.5 then
+								humanoid.WalkSpeed = desiredSpeed
 							end
 
-							-- Issue MoveTo ONCE so Roblox accelerates to full 234+ WalkSpeed without stutter!
+							if AutoFarmStateLabel then
+								local spdDisplay = math.floor(humanoid.WalkSpeed + 0.5)
+								local speedTag = autoFarmSpeed > 0 and string.format("@ %d spd", spdDisplay) or string.format("@ %d spd [Max]", spdDisplay)
+								AutoFarmStateLabel:SetText(string.format("Farm State: Running to egg (%dm %s)", math.floor(flatDist + 0.5), speedTag))
+							end
+
+							-- Issue MoveTo ONCE so Roblox accelerates to desired WalkSpeed without stutter!
 							humanoid:MoveTo(moveTargetPos)
 							local lastMoveIssueTime = os.clock()
 							lastStuckPos = rootPart.Position
@@ -2555,6 +2631,13 @@ do
 								local hpCheck = tonumber(bestEgg:GetAttribute("Health"))
 								if hpCheck and hpCheck <= 0 then
 									break
+								end
+
+								-- Dynamically keep walkspeed adjusted if autoFarmSpeed or mounted status changes
+								local curLegit = getLegitMaxSpeed(humanoid)
+								local curDesired = (autoFarmSpeed > 0) and math.clamp(autoFarmSpeed, 16, curLegit) or curLegit
+								if math.abs(humanoid.WalkSpeed - curDesired) > 0.5 then
+									humanoid.WalkSpeed = curDesired
 								end
 
 								-- Unstuck handling
@@ -2578,6 +2661,9 @@ do
 								task.wait(0.05)
 							end
 						end
+
+						-- Restore full legitimate speed when within reach of the egg
+						restoreLegitSpeed(humanoid)
 
 						-- Within reach of egg
 						local curDist = (bestEgg.Position - rootPart.Position).Magnitude
@@ -2616,6 +2702,7 @@ do
 						end
 					else
 						activeFarmTargetEgg = nil
+						restoreLegitSpeed(humanoid)
 						humanoid:MoveTo(rootPart.Position)
 						if AutoFarmTargetLabel then
 							AutoFarmTargetLabel:SetText("Target: None found in selected zone")
@@ -2628,6 +2715,13 @@ do
 				end
 			else
 				activeFarmTargetEgg = nil
+				pcall(function()
+					local c = player.Character
+					local h = c and c:FindFirstChildOfClass("Humanoid")
+					if h then
+						restoreLegitSpeed(h)
+					end
+				end)
 				task.wait(0.4)
 			end
 		end
@@ -4223,6 +4317,9 @@ Toggles.AutoFarmEnabled:OnChanged(function(Value)
 			if hum and root then
 				hum:MoveTo(root.Position)
 			end
+			if restoreNativeWalkSpeed then
+				restoreNativeWalkSpeed()
+			end
 		end)
 		if AutoFarmStateLabel then
 			AutoFarmStateLabel:SetText("Farm State: Off")
@@ -4265,6 +4362,14 @@ Options.AutoFarmReach:OnChanged(function(Value)
 	autoSaveActiveConfig()
 end)
 
+Options.AutoFarmSpeed:OnChanged(function(Value)
+	autoFarmSpeed = tonumber(Value) or 0
+	if autoFarmSpeed == 0 and restoreNativeWalkSpeed then
+		pcall(restoreNativeWalkSpeed)
+	end
+	autoSaveActiveConfig()
+end)
+
 --// Load Autoload Config on Startup \\--
 SaveManager:LoadAutoloadConfig()
 task.delay(0.6, function()
@@ -4290,6 +4395,9 @@ Library:OnUnload(function()
 	isRunning = false
 	autoFarmEnabled = false
 	activeFarmTargetEgg = nil
+	if restoreNativeWalkSpeed then
+		pcall(restoreNativeWalkSpeed)
+	end
 	antiAfkEnabled = false
 	autoReconnectEnabled = false
 	if lowPowerEnabled then
