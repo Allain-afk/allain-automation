@@ -90,7 +90,6 @@ local petEspColorByRarity = true
 local petEspHighlightEnabled = true
 local petEspBillboardEnabled = true
 local petEspColor = Color3.fromRGB(85, 240, 150)
-local petEspMaxDistance = 500
 local petEspInfoSelected = {
 	Name = true,
 	Rarity = true,
@@ -142,7 +141,6 @@ local eggEspEnabled = false
 local eggEspColorByRarity = true
 local eggEspColor = Color3.fromRGB(255, 215, 80)
 local eggMinLuck = 100
-local eggEspMaxDistance = 600
 local eggRaritySelected = {}
 for _, r in ipairs(petRarityList) do
 	eggRaritySelected[r] = true
@@ -188,7 +186,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "Break and Steal an Egg Keyless - by Allain",
 	Footer = "Allain-afk · Break and Steal an Egg",
-	FooterRight = "v3.0",
+	FooterRight = "v3.1",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(870, 690),
@@ -505,15 +503,6 @@ PetEspBox:AddDropdown("PetEspInfo", {
 	Tooltip = "Select which details appear on hatched pets",
 })
 
-PetEspBox:AddSlider("PetEspMaxDistance", {
-	Text = "Pet Max Distance",
-	Default = petEspMaxDistance,
-	Min = 20,
-	Max = 2500,
-	Rounding = 0,
-	Suffix = " studs",
-})
-
 local TopPetsRadarBox = Tabs.Visuals:AddGroupbox({
 	Side = "Right",
 	Name = "Live Top-Pets Radar",
@@ -585,15 +574,6 @@ EggGuardEspBox:AddDropdown("EggRarityFilter", {
 	Tooltip = "Only unbroken eggs with the selected rarities will be shown",
 })
 
-EggGuardEspBox:AddSlider("EggEspMaxDistance", {
-	Text = "Egg Max Distance",
-	Default = eggEspMaxDistance,
-	Min = 50,
-	Max = 2500,
-	Rounding = 0,
-	Suffix = " studs",
-})
-
 EggGuardEspBox:AddDivider()
 
 EggGuardEspBox:AddCheckbox("GuardEspEnabled", {
@@ -621,16 +601,17 @@ local EspStyleBox = Tabs.Visuals:AddGroupbox({
 	Side = "Right",
 	Name = "ESP Appearance",
 	IconName = "sliders-horizontal",
-	Description = "Customize range, font size, and highlight transparency.",
+	Description = "Global range, font size, and highlight transparency for all ESPs.",
 })
 
 EspStyleBox:AddSlider("EspMaxDistance", {
-	Text = "Max Distance",
+	Text = "Global Max Distance",
 	Default = espMaxDistance,
 	Min = 50,
 	Max = 5000,
 	Rounding = 0,
 	Suffix = " studs",
+	Tooltip = "Uniform maximum render distance for Player ESP, Hatched Pet ESP, Egg ESP, and Guard ESP",
 })
 
 EspStyleBox:AddSlider("EspTextSize", {
@@ -1905,7 +1886,7 @@ local function updateAllPetEsp()
 				local cpsNum = (cpsText and cpsText ~= "") and (parseAbbreviatedNumber(cpsText:gsub("/s", "")) or 0) or 0
 				local cashAllowed = (petEspMinCashValue <= 0) or (cpsNum >= petEspMinCashValue)
 
-				if dist <= petEspMaxDistance and isPetRarityAllowed(finalRarity) and cashAllowed then
+				if dist <= espMaxDistance and isPetRarityAllowed(finalRarity) and cashAllowed then
 					local entry = createOrGetPetEsp(petModel)
 					local color = getPetDisplayColor(finalRarity)
 
@@ -2214,7 +2195,7 @@ local function updateAllEggEsp()
 			local luckNum = tonumber(luckAttr:match("([%d%.]+)")) or 0
 			local rarityAllowed = (eggRarity == "") or isRaritySelectedInTable(eggRarity, eggRaritySelected)
 
-			if dist <= eggEspMaxDistance and luckNum >= eggMinLuck and rarityAllowed then
+			if dist <= espMaxDistance and luckNum >= eggMinLuck and rarityAllowed then
 				local entry = createOrGetEggEsp(eggPart)
 				local color = getEggDisplayColor(eggRarity)
 
@@ -2782,28 +2763,34 @@ Options.EspInfo:OnChanged(function(Value)
 	autoSaveActiveConfig()
 end)
 
+local function refreshAllActiveEsps()
+	pcall(updateAllEsp)
+	pcall(updateAllPetEsp)
+	pcall(updateAllEggEsp)
+	pcall(updateAllGuardEsp)
+end
+
 Options.EspMaxDistance:OnChanged(function(Value)
 	espMaxDistance = Value
-	pcall(updateAllEsp)
+	refreshAllActiveEsps()
 	autoSaveActiveConfig()
 end)
 
 Options.EspTextSize:OnChanged(function(Value)
 	espTextSize = Value
-	pcall(updateAllEsp)
+	refreshAllActiveEsps()
 	autoSaveActiveConfig()
 end)
 
 Options.EspFillTrans:OnChanged(function(Value)
 	espFillTrans = Value
-	pcall(updateAllEsp)
+	refreshAllActiveEsps()
 	autoSaveActiveConfig()
 end)
 
 Options.EspOutlineTrans:OnChanged(function(Value)
 	espOutlineTrans = Value
-	pcall(updateAllEsp)
-	pcall(updateAllPetEsp)
+	refreshAllActiveEsps()
 	autoSaveActiveConfig()
 end)
 
@@ -2864,12 +2851,6 @@ Options.PetEspInfo:OnChanged(function(Value)
 	autoSaveActiveConfig()
 end)
 
-Options.PetEspMaxDistance:OnChanged(function(Value)
-	petEspMaxDistance = Value
-	pcall(updateAllPetEsp)
-	autoSaveActiveConfig()
-end)
-
 Toggles.EggEspEnabled:OnChanged(function(Value)
 	eggEspEnabled = Value
 	pcall(updateAllEggEsp)
@@ -2902,12 +2883,6 @@ Options.EggRarityFilter:OnChanged(function(Value)
 	if typeof(Value) == "table" then
 		eggRaritySelected = Value
 	end
-	pcall(updateAllEggEsp)
-	autoSaveActiveConfig()
-end)
-
-Options.EggEspMaxDistance:OnChanged(function(Value)
-	eggEspMaxDistance = Value
 	pcall(updateAllEggEsp)
 	autoSaveActiveConfig()
 end)
