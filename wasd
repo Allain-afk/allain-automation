@@ -237,7 +237,7 @@ local AutoPetStatusLabel, AutoPickaxeStatusLabel, AutoTrailStatusLabel, AutoPlot
 local AutoFarmTargetLabel, AutoFarmStateLabel, AutoFarmStatsLabel
 local TopPet1Label, TopPet2Label, TopPet3Label
 local RareMinCashStatusLabel
-local WebhookBox
+local WebhookBox, scanSpeedAndZoneData
 
 do
 	--// Tab 1: Anti-AFK (Controls, Visualizer, Session Dashboard)
@@ -477,19 +477,58 @@ do
 		"Prism Egg",
 		"Ethereal Egg",
 	}
-	local knownZoneList = {
-		"All Zones",
-		"Zone 1",
-		"Zone 2",
-		"Zone 3",
-		"Zone 4",
-		"Zone 5",
-		"Zone 6",
-		"Zone 7",
-		"Zone 8",
-		"Zone 9",
-		"Zone 10",
-	}
+	local function collectAllWorldZones()
+		local zones = { "All Zones" }
+		local seen = { ["All Zones"] = true }
+		local build = workspace:FindFirstChild("Build")
+		local zoneBuilds = build and build:FindFirstChild("ZoneBuilds")
+		local found = {}
+
+		if zoneBuilds then
+			for _, child in ipairs(zoneBuilds:GetChildren()) do
+				local name = child.Name
+				if not seen[name] then
+					seen[name] = true
+					table.insert(found, name)
+				end
+			end
+		end
+
+		for _, child in ipairs(workspace:GetChildren()) do
+			if (child:IsA("Folder") or child:IsA("Model")) and child.Name:match("^[Zz]one") then
+				if not seen[child.Name] then
+					seen[child.Name] = true
+					table.insert(found, child.Name)
+				end
+			end
+		end
+
+		table.sort(found, function(a, b)
+			local numA = tonumber(a:match("(%d+)")) or 9999
+			local numB = tonumber(b:match("(%d+)")) or 9999
+			if numA ~= numB then
+				return numA < numB
+			end
+			return a < b
+		end)
+
+		for _, name in ipairs(found) do
+			table.insert(zones, name)
+		end
+
+		for i = 1, 35 do
+			local zName = "Zone " .. tostring(i)
+			local compactName = "Zone" .. tostring(i)
+			if not seen[zName] and not seen[compactName] then
+				seen[zName] = true
+				table.insert(zones, zName)
+			end
+		end
+
+		return zones
+	end
+
+	local knownZoneList = collectAllWorldZones()
 
 	AutoFarmBox = Tabs.Automation:AddGroupbox({
 		Side = "Left",
@@ -562,6 +601,16 @@ do
 		Suffix = " studs",
 		Tooltip = "Distance to stop from the egg so in-game Auto Swing engages",
 	})
+
+	AutoFarmBox:AddDivider()
+
+	AutoFarmBox:AddButton("Scan Speed & Zone Data to Webhook", function()
+		if scanSpeedAndZoneData then
+			scanSpeedAndZoneData()
+		else
+			Library:Notify("Diagnostic function loading...", 2)
+		end
+	end)
 
 	local AutoStatusBox = Tabs.Automation:AddGroupbox({
 		Side = "Right",
@@ -1372,6 +1421,200 @@ WebhookBox:AddButton("Send Test Progress Webhook", function()
 		Library:Notify("Progress report sent to Discord!", 3)
 	else
 		Library:Notify("Webhook failed: " .. tostring(err), 4)
+	end
+end)
+
+scanSpeedAndZoneData = function()
+	task.spawn(function()
+		if not webhookUrl or webhookUrl == "" then
+			Library:Notify("Please enter a Webhook URL in AFK & Alerts tab first!", 4)
+			return
+		end
+
+		Library:Notify("Starting Speed & Zone scan... Sending to Webhook!", 3)
+
+		-- Part 1: Player Movement, Speed & Character Mechanics
+		local p1Lines = {}
+		table.insert(p1Lines, "-- Part 1: Player Movement, Speed & Character Mechanics --")
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+
+		if humanoid then
+			table.insert(p1Lines, string.format("Humanoid: WalkSpeed = %s, JumpPower = %s, Health = %s/%s", tostring(humanoid.WalkSpeed), tostring(humanoid.JumpPower), tostring(humanoid.Health), tostring(humanoid.MaxHealth)))
+			table.insert(p1Lines, string.format("Humanoid: MoveDirection = %s, FloorMaterial = %s", tostring(humanoid.MoveDirection), tostring(humanoid.FloorMaterial)))
+		else
+			table.insert(p1Lines, "Humanoid: NOT FOUND")
+		end
+
+		if rootPart then
+			local vel = rootPart.AssemblyLinearVelocity or rootPart.Velocity
+			table.insert(p1Lines, string.format("HRP: Velocity = %s, Magnitude = %.2f", tostring(vel), vel and vel.Magnitude or 0))
+		end
+
+		if character then
+			local charAttrs = character:GetAttributes()
+			local charAttrStrs = {}
+			for k, v in pairs(charAttrs) do
+				table.insert(charAttrStrs, string.format("%s=%s", tostring(k), tostring(v)))
+			end
+			table.insert(p1Lines, string.format("Character Attrs (%d): {%s}", #charAttrStrs, table.concat(charAttrStrs, ", ")))
+
+			local charMovers = {}
+			for _, ch in ipairs(character:GetChildren()) do
+				if ch:IsA("BodyMover") or ch:IsA("Constraint") or ch:IsA("BodyVelocity") or ch:IsA("LinearVelocity") or ch:IsA("VectorForce") or ch:IsA("AlignPosition") or ch.Name:lower():find("speed") or ch.Name:lower():find("move") then
+					table.insert(charMovers, string.format("%s (%s)", ch.Name, ch.ClassName))
+				end
+			end
+			if #charMovers > 0 then
+				table.insert(p1Lines, string.format("Character Movement Movers: [%s]", table.concat(charMovers, ", ")))
+			else
+				table.insert(p1Lines, "Character Movement Movers: None found")
+			end
+
+			local heldTool = character:FindFirstChildOfClass("Tool")
+			table.insert(p1Lines, string.format("Currently Held Tool: %s", heldTool and heldTool.Name or "None"))
+		end
+
+		-- Player attributes related to speed
+		local playerAttrs = player:GetAttributes()
+		local speedAttrStrs = {}
+		for k, v in pairs(playerAttrs) do
+			local kLower = tostring(k):lower()
+			if kLower:find("speed") or kLower:find("mount") or kLower:find("ride") or kLower:find("boost") or kLower:find("power") or kLower:find("walk") or kLower:find("sprint") then
+				table.insert(speedAttrStrs, string.format("%s=%s", tostring(k), tostring(v)))
+			end
+		end
+		table.insert(p1Lines, string.format("Player Speed-Related Attrs (%d): {%s}", #speedAttrStrs, table.concat(speedAttrStrs, ", ")))
+
+		local ls = player:FindFirstChild("leaderstats")
+		if ls then
+			local lsParts = {}
+			for _, item in ipairs(ls:GetChildren()) do
+				table.insert(lsParts, string.format("%s=%s", item.Name, tostring(item.Value)))
+			end
+			table.insert(p1Lines, string.format("Leaderstats: {%s}", table.concat(lsParts, ", ")))
+		end
+
+		local pScripts = player:FindFirstChild("PlayerScripts")
+		if pScripts then
+			local scrNames = {}
+			for _, s in ipairs(pScripts:GetChildren()) do
+				table.insert(scrNames, string.format("%s (%s)", s.Name, s.ClassName))
+			end
+			table.insert(p1Lines, string.format("PlayerScripts (%d): [%s]", #scrNames, table.concat(scrNames, ", ")))
+		end
+
+		local rideMounts = workspace:FindFirstChild("RideMounts")
+		if rideMounts then
+			table.insert(p1Lines, string.format("workspace.RideMounts (%d children):", #rideMounts:GetChildren()))
+			for _, m in ipairs(rideMounts:GetChildren()) do
+				if m:GetAttribute("OwnerUserId") == player.UserId or m.Name:find(tostring(player.UserId)) or m.Name:find(player.Name) then
+					table.insert(p1Lines, string.format("  -> Your Mount: %s (Class: %s)", m.Name, m.ClassName))
+				end
+			end
+		end
+
+		local dump1 = table.concat(p1Lines, "\n")
+		if #dump1 > 3800 then dump1 = dump1:sub(1, 3800) .. "\n... (truncated)" end
+		postDiscordEmbed({
+			title = "Speed & Zone Diagnostics (Part 1/3: Speed & Mechanics)",
+			description = "```text\n" .. dump1 .. "\n```",
+			color = 0x5865F2,
+		})
+
+		task.wait(1.5)
+
+		-- Part 2: Complete List of Zones in workspace
+		local p2Lines = {}
+		table.insert(p2Lines, "-- Part 2: All Workspace Zones & Hierarchy --")
+		local build = workspace:FindFirstChild("Build")
+		local zoneBuilds = build and build:FindFirstChild("ZoneBuilds")
+		if zoneBuilds then
+			local zoneList = zoneBuilds:GetChildren()
+			table.insert(p2Lines, string.format("workspace.Build.ZoneBuilds: %d zones found", #zoneList))
+			table.sort(zoneList, function(a, b)
+				local numA = tonumber(a.Name:match("(%d+)")) or 9999
+				local numB = tonumber(b.Name:match("(%d+)")) or 9999
+				if numA ~= numB then return numA < numB end
+				return a.Name < b.Name
+			end)
+			for _, z in ipairs(zoneList) do
+				local attrs = z:GetAttributes()
+				local attrPairs = {}
+				for k, v in pairs(attrs) do
+					table.insert(attrPairs, string.format("%s=%s", tostring(k), tostring(v)))
+				end
+				local attrStr = #attrPairs > 0 and (" {" .. table.concat(attrPairs, ", ") .. "}") or ""
+				local eggsF = z:FindFirstChild("Eggs")
+				local eggCount = eggsF and #eggsF:GetChildren() or 0
+				table.insert(p2Lines, string.format("[%s] Eggs: %d%s", z.Name, eggCount, attrStr))
+			end
+		else
+			table.insert(p2Lines, "workspace.Build.ZoneBuilds: NOT FOUND")
+		end
+
+		local otherZones = {}
+		for _, child in ipairs(workspace:GetChildren()) do
+			if child.Name:lower():find("zone") and child ~= build then
+				table.insert(otherZones, string.format("%s (%s, %d children)", child.Name, child.ClassName, #child:GetChildren()))
+			end
+		end
+		if #otherZones > 0 then
+			table.insert(p2Lines, string.format("Other Zone Folders: [%s]", table.concat(otherZones, ", ")))
+		end
+
+		local dump2 = table.concat(p2Lines, "\n")
+		if #dump2 > 3800 then dump2 = dump2:sub(1, 3800) .. "\n... (truncated)" end
+		postDiscordEmbed({
+			title = "Speed & Zone Diagnostics (Part 2/3: All Zones)",
+			description = "```text\n" .. dump2 .. "\n```",
+			color = 0x57F287,
+		})
+
+		task.wait(1.5)
+
+		-- Part 3: Egg Details across zones
+		local p3Lines = {}
+		table.insert(p3Lines, "-- Part 3: Eggs in Each Zone --")
+		if zoneBuilds then
+			local zoneList = zoneBuilds:GetChildren()
+			table.sort(zoneList, function(a, b)
+				local numA = tonumber(a.Name:match("(%d+)")) or 9999
+				local numB = tonumber(b.Name:match("(%d+)")) or 9999
+				return numA < numB
+			end)
+			for _, z in ipairs(zoneList) do
+				local eggsF = z:FindFirstChild("Eggs")
+				if eggsF and #eggsF:GetChildren() > 0 then
+					local eggNames = {}
+					for _, ec in ipairs(eggsF:GetChildren()) do
+						local ep = ec:FindFirstChild("Egg") or (ec:IsA("BasePart") and ec)
+						local eName = ep and (ep:GetAttribute("EggInfoName") or ep:GetAttribute("EggType")) or ec.Name
+						local luck = ep and (ep:GetAttribute("EggInfoLuck") or ep:GetAttribute("HatchLuck")) or ""
+						local hp = ep and ep:GetAttribute("Health") or ""
+						table.insert(eggNames, string.format("%s [L:%s, HP:%s]", tostring(eName), tostring(luck), tostring(hp)))
+					end
+					table.insert(p3Lines, string.format("[%s]: %s", z.Name, table.concat(eggNames, " | ")))
+				end
+			end
+		end
+
+		local dump3 = table.concat(p3Lines, "\n")
+		if #dump3 > 3800 then dump3 = dump3:sub(1, 3800) .. "\n... (truncated)" end
+		postDiscordEmbed({
+			title = "Speed & Zone Diagnostics (Part 3/3: Egg Details)",
+			description = "```text\n" .. dump3 .. "\n```",
+			color = 0xFEE75C,
+		})
+
+		Library:Notify("3-Part Speed & Zone snapshot sent to Webhook!", 4)
+	end)
+end
+
+WebhookBox:AddButton("Scan Speed & Zone Data to Webhook", function()
+	if scanSpeedAndZoneData then
+		scanSpeedAndZoneData()
 	end
 end)
 
