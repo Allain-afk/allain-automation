@@ -213,6 +213,7 @@ end
 --============================================================================--
 --// Automation UI
 --============================================================================--
+local Farm -- filled in by the Farm Engine section below; declared here so UI callbacks can reach it
 local FarmBox = Tabs.Automation:AddGroupbox({
 	Side = "Left",
 	Name = "Egg Auto-Farm",
@@ -266,6 +267,23 @@ FarmBox:AddCheckbox("BalutUseAutoSwing", {
 	Text = "Use In-Game Auto Swing",
 	Default = true,
 	Tooltip = "Turns on the game's Auto Swing button. If it can't, the farm clicks with your Asarol instead",
+})
+
+FarmBox:AddCheckbox("BalutBestAsarol", {
+	Text = "Auto Equip Best Asarol",
+	Default = true,
+	Tooltip = "Equips your strongest owned Asarol before farming. The first time, it equips each one once to read its power (saved for next time)",
+})
+
+FarmBox:AddButton({
+	Text = "Re-check Asarol Power",
+	Tooltip = "Forget the saved Asarol powers and measure them again on the next farm pass",
+	Func = function()
+		if Farm then
+			Farm.resetAsarolPower()
+			Library:Notify("Asarol powers will be re-checked on the next farm pass.", 3)
+		end
+	end,
 })
 
 local StealBox = Tabs.Automation:AddGroupbox({
@@ -386,7 +404,7 @@ end)
 --   workspace.Map.Plots.PlotN      attr OwnerUserId; child PlayerSpawn; Trisikad (attr Rider)
 --   workspace.Map.Decor.Guards     guard models; their state arrives through Remotes.GuardFx
 --   player attrs Carrying (pet id while carrying), AutoSwing (in-game Auto Swing state)
-local Farm = {
+Farm = {
 	RENDER_STEP = "AllainBalutFarmMove",
 	moveDir = nil,
 	skippedEggs = setmetatable({}, { __mode = "k" }),
@@ -709,6 +727,147 @@ function Farm.swing(tool)
 		pcall(function()
 			tool:Activate()
 		end)
+	end
+end
+
+--// Best Asarol: damage comes from the equipped Asarol's power (server-side), e.g. Iron 15 vs Bathala 150M.
+-- The game doesn't expose each Asarol's power, so equip each owned one once, read AsarolPower, and cache it.
+Farm.asarol = {
+	power = {}, -- name -> power (-1 = couldn't equip this session)
+	FOLDER = "AllainAutomation/steal-a-balut",
+	FILE = "AllainAutomation/steal-a-balut/asarol-power.json",
+	lastOwned = nil,
+	lastEquipped = nil,
+	summary = nil,
+}
+
+pcall(function()
+	if isfile and readfile and isfile(Farm.asarol.FILE) then
+		for name, power in pairs(HttpService:JSONDecode(readfile(Farm.asarol.FILE))) do
+			if typeof(power) == "number" then
+				Farm.asarol.power[name] = power
+			end
+		end
+	end
+end)
+
+function Farm.saveAsarolPower()
+	if not writefile then
+		return
+	end
+	pcall(function()
+		if makefolder and isfolder then
+			if not isfolder("AllainAutomation") then
+				makefolder("AllainAutomation")
+			end
+			if not isfolder(Farm.asarol.FOLDER) then
+				makefolder(Farm.asarol.FOLDER)
+			end
+		end
+		local data = {}
+		for name, power in pairs(Farm.asarol.power) do
+			if power >= 0 then
+				data[name] = power
+			end
+		end
+		writefile(Farm.asarol.FILE, HttpService:JSONEncode(data))
+	end)
+end
+
+function Farm.resetAsarolPower()
+	local a = Farm.asarol
+	a.power, a.lastOwned, a.lastEquipped, a.summary = {}, nil, nil, nil
+	if delfile and isfile then
+		pcall(function()
+			if isfile(a.FILE) then
+				delfile(a.FILE)
+			end
+		end)
+	end
+end
+
+function Farm.ownedAsarols()
+	local list = {}
+	for name in tostring(player:GetAttribute("OwnedAsarols") or ""):gmatch("[^,]+") do
+		name = name:match("^%s*(.-)%s*$")
+		if name ~= "" and not table.find(list, name) then
+			table.insert(list, name)
+		end
+	end
+	return list
+end
+
+-- Same call the game's Asarol shop makes; waits until the server confirms the swap
+function Farm.equipAsarol(name)
+	local remote = Farm.remote("AsarolShop")
+	if not remote then
+		return false
+	end
+	local ok = pcall(function()
+		remote:InvokeServer("Equip", name)
+	end)
+	local untilT = os.clock() + 2
+	while player:GetAttribute("EquippedAsarol") ~= name and os.clock() < untilT do
+		task.wait(0.1)
+	end
+	task.wait(0.2) -- AsarolPower is set alongside EquippedAsarol; give it a moment
+	return ok and player:GetAttribute("EquippedAsarol") == name
+end
+
+function Farm.ensureBestAsarol()
+	if not Toggles.BalutBestAsarol.Value then
+		return
+	end
+	local a = Farm.asarol
+	local owned, equipped = player:GetAttribute("OwnedAsarols"), player:GetAttribute("EquippedAsarol")
+	if owned == nil or (owned == a.lastOwned and equipped == a.lastEquipped) then
+		return -- nothing changed since the last check
+	end
+
+	-- The equipped one can be read for free
+	local nowPower = tonumber(player:GetAttribute("AsarolPower"))
+	if equipped and nowPower then
+		a.power[equipped] = nowPower
+	end
+
+	local names = Farm.ownedAsarols()
+	local measured, complete = false, true
+	for _, name in ipairs(names) do
+		if a.power[name] == nil then
+			if not Toggles.BalutFarmEggs.Value or Library.Unloaded then
+				complete = false
+				break
+			end
+			Farm.setState("Checking Asarol power: " .. name .. "...")
+			if Farm.equipAsarol(name) then
+				a.power[name] = tonumber(player:GetAttribute("AsarolPower")) or 0
+			else
+				a.power[name] = -1
+			end
+			measured = true
+			task.wait(0.4)
+		end
+	end
+	if measured then
+		Farm.saveAsarolPower()
+	end
+
+	local best, bestPower = nil, nil
+	for _, name in ipairs(names) do
+		local p = a.power[name]
+		if p and p >= 0 and (not bestPower or p > bestPower) then
+			best, bestPower = name, p
+		end
+	end
+	if best and best ~= player:GetAttribute("EquippedAsarol") then
+		Farm.setState("Equipping best Asarol: " .. best .. "...")
+		Farm.equipAsarol(best)
+	end
+	if best then
+		a.summary = string.format("%s (%s power)", best, Util.formatNumber(bestPower))
+	end
+	if complete then
+		a.lastOwned, a.lastEquipped = player:GetAttribute("OwnedAsarols"), player:GetAttribute("EquippedAsarol")
 	end
 end
 
@@ -1110,8 +1269,9 @@ function Farm.tick()
 		end
 	end
 
-	-- 3. Eggs
+	-- 3. Eggs (strongest Asarol first: it is what sets your damage)
 	if farmOn then
+		Farm.ensureBestAsarol()
 		local egg = Farm.findEgg(root)
 		if egg then
 			Farm.breakEgg(char, hum, root, egg)
@@ -1173,6 +1333,11 @@ task.spawn(function()
 		if Toggles.BalutFarmEggs.Value then
 			local e = Farm.eggScan
 			table.insert(lines, string.format("Eggs: %d alive · %d filtered out · %d guarded", e.total, e.filtered, e.guarded))
+			table.insert(lines, string.format(
+				"Asarol: %s · power %s",
+				tostring(player:GetAttribute("EquippedAsarol") or "?"),
+				Util.formatNumber(player:GetAttribute("AsarolPower") or 0)
+			) .. (Farm.asarol.summary and (" · best owned: " .. Farm.asarol.summary) or ""))
 		end
 		if Toggles.BalutFarmEggs.Value or Toggles.BalutStealPets.Value then
 			local p = Farm.petScan

@@ -61,6 +61,7 @@ Change any keybind in the menu. Your settings are saved automatically.
 - **Auto-Steal Pets**: runs to wild pets, holds E on them and walks them home to your base. Filter by rarity and minimum income; pets that would despawn before you get there are skipped.
 - **Always Take Pets I Hatch**: takes the pet from every egg the farm breaks, even with only Egg Auto-Farm on.
 - **Auto Equip Best** after each pet reaches your base.
+- **Auto Equip Best Asarol**: equips your strongest owned Asarol before farming, since your Asarol's power sets your egg damage. The first time, it equips each Asarol once to measure it, then remembers the results.
 - **Guard avoidance**: skips eggs and pets near guards and backs off when a guard is alerted or chasing.
 - Gets off the Trisikad before walking.
 
