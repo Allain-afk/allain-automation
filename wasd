@@ -1503,394 +1503,396 @@ WebhookBox:AddButton("Send Test Progress Webhook", function()
 end)
 
 --// TEMP DIAGNOSTIC: Diamond Drop Scan (remove once diamond pickup automation is built) \\--
-local diamondScanRunning = false
-WebhookBox:AddButton("Diamond Drop Scan (60s)", function()
-	if diamondScanRunning then
-		Library:Notify("Diamond scan already running...", 2)
-		return
-	end
-	if not webhookUrl or webhookUrl == "" then
-		Library:Notify("Please enter a Webhook URL first!", 4)
-		return
-	end
-	diamondScanRunning = true
+do
+	local diamondScanRunning = false
+	WebhookBox:AddButton("Diamond Drop Scan (60s)", function()
+		if diamondScanRunning then
+			Library:Notify("Diamond scan already running...", 2)
+			return
+		end
+		if not webhookUrl or webhookUrl == "" then
+			Library:Notify("Please enter a Webhook URL first!", 4)
+			return
+		end
+		diamondScanRunning = true
 
-	task.spawn(function()
-		local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
-		local KEYWORDS ={ "diamond", "gem", "drop", "loot", "collect", "pickup", "currency", "coin", "reward" }
-		local function matchesKeyword(str)
-			str = tostring(str or ""):lower()
-			for _, k in ipairs(KEYWORDS) do
-				if str:find(k, 1, true) then
-					return k
+		task.spawn(function()
+			local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
+			local KEYWORDS ={ "diamond", "gem", "drop", "loot", "collect", "pickup", "currency", "coin", "reward" }
+			local function matchesKeyword(str)
+				str = tostring(str or ""):lower()
+				for _, k in ipairs(KEYWORDS) do
+					if str:find(k, 1, true) then
+						return k
+					end
 				end
+				return nil
 			end
-			return nil
-		end
-		local function isDiamondish(str)
-			str = tostring(str or ""):lower()
-			return str:find("diamond", 1, true) or str:find("gem", 1, true)
-		end
-		local function shortPath(inst)
-			local ok, p = pcall(function()
-				return inst:GetFullName()
-			end)
-			p = ok and p or tostring(inst)
-			return (p:gsub("^Players%.[^%.]+%.PlayerGui%.", "PlayerGui."))
-		end
-		local function attrString(inst)
-			local parts = {}
-			for k, v in pairs(inst:GetAttributes()) do
-				table.insert(parts, string.format("%s=%s", tostring(k), tostring(v)))
+			local function isDiamondish(str)
+				str = tostring(str or ""):lower()
+				return str:find("diamond", 1, true) or str:find("gem", 1, true)
 			end
-			return #parts > 0 and ("{" .. table.concat(parts, ", ") .. "}") or ""
-		end
-		local function instPos(inst)
-			if inst:IsA("BasePart") then
-				return inst.Position
-			elseif inst:IsA("Model") then
-				local ok, cf = pcall(function()
-					return inst:GetPivot()
+			local function shortPath(inst)
+				local ok, p = pcall(function()
+					return inst:GetFullName()
 				end)
-				return ok and cf.Position or nil
-			elseif inst:IsA("Attachment") then
-				return inst.WorldPosition
+				p = ok and p or tostring(inst)
+				return (p:gsub("^Players%.[^%.]+%.PlayerGui%.", "PlayerGui."))
 			end
-			return nil
-		end
-		local function myPos()
-			local char = player.Character
-			local hrp = char and char:FindFirstChild("HumanoidRootPart")
-			return hrp and hrp.Position or nil
-		end
-		local function distTo(pos)
-			local mp = myPos()
-			return (mp and pos) and (mp - pos).Magnitude or -1
-		end
-		local function childSummary(inst)
-			local bits = {}
-			local count = 0
-			for _, d in ipairs(inst:GetDescendants()) do
-				count += 1
-				if d:IsA("TouchTransmitter") then
-					table.insert(bits, "TouchInterest@" .. d.Parent.Name)
-				elseif d:IsA("ProximityPrompt") then
-					table.insert(bits, string.format("Prompt(%s,%s,dist=%s)", d.ActionText, d.ObjectText, tostring(d.MaxActivationDistance)))
-				elseif d:IsA("ClickDetector") then
-					table.insert(bits, "ClickDetector")
-				elseif d:IsA("TextLabel") and d.Text ~= "" then
-					table.insert(bits, string.format("Text=%q", d.Text:sub(1, 30)))
-				elseif d:IsA("BodyMover") or d:IsA("AlignPosition") or d:IsA("LinearVelocity") then
-					table.insert(bits, "Mover:" .. d.ClassName)
-				elseif d:IsA("ValueBase") then
-					table.insert(bits, string.format("%s(%s)=%s", d.Name, d.ClassName, tostring(d.Value)))
+			local function attrString(inst)
+				local parts = {}
+				for k, v in pairs(inst:GetAttributes()) do
+					table.insert(parts, string.format("%s=%s", tostring(k), tostring(v)))
 				end
-				if #bits >= 8 then
-					break
+				return #parts > 0 and ("{" .. table.concat(parts, ", ") .. "}") or ""
+			end
+			local function instPos(inst)
+				if inst:IsA("BasePart") then
+					return inst.Position
+				elseif inst:IsA("Model") then
+					local ok, cf = pcall(function()
+						return inst:GetPivot()
+					end)
+					return ok and cf.Position or nil
+				elseif inst:IsA("Attachment") then
+					return inst.WorldPosition
+				end
+				return nil
+			end
+			local function myPos()
+				local char = player.Character
+				local hrp = char and char:FindFirstChild("HumanoidRootPart")
+				return hrp and hrp.Position or nil
+			end
+			local function distTo(pos)
+				local mp = myPos()
+				return (mp and pos) and (mp - pos).Magnitude or -1
+			end
+			local function childSummary(inst)
+				local bits = {}
+				local count = 0
+				for _, d in ipairs(inst:GetDescendants()) do
+					count += 1
+					if d:IsA("TouchTransmitter") then
+						table.insert(bits, "TouchInterest@" .. d.Parent.Name)
+					elseif d:IsA("ProximityPrompt") then
+						table.insert(bits, string.format("Prompt(%s,%s,dist=%s)", d.ActionText, d.ObjectText, tostring(d.MaxActivationDistance)))
+					elseif d:IsA("ClickDetector") then
+						table.insert(bits, "ClickDetector")
+					elseif d:IsA("TextLabel") and d.Text ~= "" then
+						table.insert(bits, string.format("Text=%q", d.Text:sub(1, 30)))
+					elseif d:IsA("BodyMover") or d:IsA("AlignPosition") or d:IsA("LinearVelocity") then
+						table.insert(bits, "Mover:" .. d.ClassName)
+					elseif d:IsA("ValueBase") then
+						table.insert(bits, string.format("%s(%s)=%s", d.Name, d.ClassName, tostring(d.Value)))
+					end
+					if #bits >= 8 then
+						break
+					end
+				end
+				return string.format("desc=%d [%s]", count, table.concat(bits, ", "))
+			end
+			local function partInfo(inst)
+				local part = inst:IsA("BasePart") and inst or (inst:IsA("Model") and (inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart", true)))
+				if not part then
+					return ""
+				end
+				return string.format("Anch=%s CanTouch=%s CanCollide=%s Size=%.1f,%.1f,%.1f", tostring(part.Anchored), tostring(part.CanTouch), tostring(part.CanCollide), part.Size.X, part.Size.Y, part.Size.Z)
+			end
+			local function sendDump(title, lines, color)
+				local dump = table.concat(lines, "\n")
+				if #dump > 3800 then
+					dump = dump:sub(1, 3800) .. "\n... (truncated)"
+				end
+				postDiscordEmbed({
+					title = title,
+					description = "```text\n" .. (dump ~= "" and dump or "(nothing found)") .. "\n```",
+					color = color,
+				})
+				task.wait(1.5)
+			end
+
+			Library:Notify("Diamond scan started! Break eggs for 60s (auto farm is fine).", 5)
+
+			--// Part 1: Static scan — currency, GUI, remotes, existing diamond objects
+			local p1 = {}
+			local attrs = {}
+			for k, v in pairs(player:GetAttributes()) do
+				if isDiamondish(k) then
+					table.insert(attrs, string.format("%s=%s", tostring(k), tostring(v)))
 				end
 			end
-			return string.format("desc=%d [%s]", count, table.concat(bits, ", "))
-		end
-		local function partInfo(inst)
-			local part = inst:IsA("BasePart") and inst or (inst:IsA("Model") and (inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart", true)))
-			if not part then
-				return ""
+			table.insert(p1, "Player diamond attrs: {" .. table.concat(attrs, ", ") .. "}")
+			local ls = player:FindFirstChild("leaderstats")
+			if ls then
+				local lsParts = {}
+				for _, item in ipairs(ls:GetChildren()) do
+					table.insert(lsParts, string.format("%s=%s", item.Name, tostring(item.Value)))
+				end
+				table.insert(p1, "Leaderstats: {" .. table.concat(lsParts, ", ") .. "}")
 			end
-			return string.format("Anch=%s CanTouch=%s CanCollide=%s Size=%.1f,%.1f,%.1f", tostring(part.Anchored), tostring(part.CanTouch), tostring(part.CanCollide), part.Size.X, part.Size.Y, part.Size.Z)
-		end
-		local function sendDump(title, lines, color)
-			local dump = table.concat(lines, "\n")
-			if #dump > 3800 then
-				dump = dump:sub(1, 3800) .. "\n... (truncated)"
+			for _, d in ipairs(player:GetDescendants()) do
+				if d:IsA("ValueBase") and isDiamondish(d.Name) then
+					table.insert(p1, string.format("[Value] %s = %s", shortPath(d), tostring(d.Value)))
+				end
 			end
-			postDiscordEmbed({
-				title = title,
-				description = "```text\n" .. (dump ~= "" and dump or "(nothing found)") .. "\n```",
-				color = color,
-			})
-			task.wait(1.5)
-		end
 
-		Library:Notify("Diamond scan started! Break eggs for 60s (auto farm is fine).", 5)
-
-		--// Part 1: Static scan — currency, GUI, remotes, existing diamond objects
-		local p1 = {}
-		local attrs = {}
-		for k, v in pairs(player:GetAttributes()) do
-			if isDiamondish(k) then
-				table.insert(attrs, string.format("%s=%s", tostring(k), tostring(v)))
-			end
-		end
-		table.insert(p1, "Player diamond attrs: {" .. table.concat(attrs, ", ") .. "}")
-		local ls = player:FindFirstChild("leaderstats")
-		if ls then
-			local lsParts = {}
-			for _, item in ipairs(ls:GetChildren()) do
-				table.insert(lsParts, string.format("%s=%s", item.Name, tostring(item.Value)))
-			end
-			table.insert(p1, "Leaderstats: {" .. table.concat(lsParts, ", ") .. "}")
-		end
-		for _, d in ipairs(player:GetDescendants()) do
-			if d:IsA("ValueBase") and isDiamondish(d.Name) then
-				table.insert(p1, string.format("[Value] %s = %s", shortPath(d), tostring(d.Value)))
-			end
-		end
-
-		local playerGui = player:FindFirstChild("PlayerGui")
-		local guiWatch = {}
-		if playerGui then
-			for _, d in ipairs(playerGui:GetDescendants()) do
-				if (d:IsA("TextLabel") or d:IsA("TextButton")) and (isDiamondish(d.Name) or isDiamondish(d.Text) or isDiamondish(d.Parent and d.Parent.Name)) then
-					if #guiWatch < 15 then
-						table.insert(guiWatch, d)
-						table.insert(p1, string.format("[GUI] %s = %q", shortPath(d), (d.Text or ""):sub(1, 40)))
+			local playerGui = player:FindFirstChild("PlayerGui")
+			local guiWatch = {}
+			if playerGui then
+				for _, d in ipairs(playerGui:GetDescendants()) do
+					if (d:IsA("TextLabel") or d:IsA("TextButton")) and (isDiamondish(d.Name) or isDiamondish(d.Text) or isDiamondish(d.Parent and d.Parent.Name)) then
+						if #guiWatch < 15 then
+							table.insert(guiWatch, d)
+							table.insert(p1, string.format("[GUI] %s = %q", shortPath(d), (d.Text or ""):sub(1, 40)))
+						end
 					end
 				end
 			end
-		end
 
-		local remoteCount = 0
-		for _, d in ipairs(ReplicatedStorage:GetDescendants()) do
-			if (d:IsA("RemoteEvent") or d:IsA("RemoteFunction") or d:IsA("UnreliableRemoteEvent")) and matchesKeyword(d.Name) then
-				remoteCount += 1
-				if remoteCount <= 25 then
-					table.insert(p1, string.format("[Remote] %s (%s)", shortPath(d), d.ClassName))
-				end
-			end
-		end
-
-		local existingCount = 0
-		for _, d in ipairs(workspace:GetDescendants()) do
-			if isDiamondish(d.Name) and (d:IsA("BasePart") or d:IsA("Model") or d:IsA("Folder")) then
-				existingCount += 1
-				if existingCount <= 15 then
-					table.insert(p1, string.format("[WS] %s (%s) %s dist=%.0f", shortPath(d), d.ClassName, attrString(d), distTo(instPos(d))))
-				end
-			end
-		end
-		table.insert(p1, string.format("Workspace diamond-named objects: %d", existingCount))
-		local topFolders = {}
-		for _, c in ipairs(workspace:GetChildren()) do
-			if c:IsA("Folder") or (c:IsA("Model") and not Players:GetPlayerFromCharacter(c)) then
-				table.insert(topFolders, string.format("%s(%d)", c.Name, #c:GetChildren()))
-			end
-		end
-		table.insert(p1, "Workspace top-level: " .. table.concat(topFolders, ", "))
-		sendDump("💎 Diamond Scan (1/4): Currency, GUI, Remotes", p1, 0x5DADE2)
-
-		--// Part 2+3: Live capture — new objects spawned + currency changes
-		local spawned = {} -- inst -> record
-		local spawnOrder = {}
-		local events = {}
-		local conns = {}
-		local startT = os.clock()
-		local function stamp()
-			return string.format("%5.1fs", os.clock() - startT)
-		end
-		local function isInCharacter(inst)
-			for _, plr in ipairs(Players:GetPlayers()) do
-				if plr.Character and inst:IsDescendantOf(plr.Character) then
-					return true
-				end
-			end
-			return false
-		end
-		local function isUnderRecorded(inst)
-			local p = inst.Parent
-			while p and p ~= workspace do
-				if spawned[p] then
-					return true
-				end
-				p = p.Parent
-			end
-			return false
-		end
-
-		table.insert(conns, workspace.DescendantAdded:Connect(function(inst)
-			if not (inst:IsA("BasePart") or inst:IsA("Model")) then
-				return
-			end
-			task.defer(function()
-				if not inst.Parent or isInCharacter(inst) or isUnderRecorded(inst) then
-					return
-				end
-				local animalPickups = workspace:FindFirstChild("AnimalPickups")
-				if animalPickups and inst:IsDescendantOf(animalPickups) then
-					return
-				end
-				local pos = instPos(inst)
-				local rec = {
-					inst = inst,
-					name = inst.Name,
-					class = inst.ClassName,
-					path = shortPath(inst),
-					t = os.clock() - startT,
-					spawnDist = distTo(pos),
-					attrs = attrString(inst),
-					children = childSummary(inst),
-					part = partInfo(inst),
-					diamondish = isDiamondish(inst.Name) or isDiamondish(attrString(inst)),
-				}
-				spawned[inst] = rec
-				table.insert(spawnOrder, rec)
-				local lastPos = pos
-				local trackConn
-				trackConn = RunService.Heartbeat:Connect(function()
-					if inst.Parent then
-						lastPos = instPos(inst) or lastPos
+			local remoteCount = 0
+			for _, d in ipairs(ReplicatedStorage:GetDescendants()) do
+				if (d:IsA("RemoteEvent") or d:IsA("RemoteFunction") or d:IsA("UnreliableRemoteEvent")) and matchesKeyword(d.Name) then
+					remoteCount += 1
+					if remoteCount <= 25 then
+						table.insert(p1, string.format("[Remote] %s (%s)", shortPath(d), d.ClassName))
 					end
+				end
+			end
+
+			local existingCount = 0
+			for _, d in ipairs(workspace:GetDescendants()) do
+				if isDiamondish(d.Name) and (d:IsA("BasePart") or d:IsA("Model") or d:IsA("Folder")) then
+					existingCount += 1
+					if existingCount <= 15 then
+						table.insert(p1, string.format("[WS] %s (%s) %s dist=%.0f", shortPath(d), d.ClassName, attrString(d), distTo(instPos(d))))
+					end
+				end
+			end
+			table.insert(p1, string.format("Workspace diamond-named objects: %d", existingCount))
+			local topFolders = {}
+			for _, c in ipairs(workspace:GetChildren()) do
+				if c:IsA("Folder") or (c:IsA("Model") and not Players:GetPlayerFromCharacter(c)) then
+					table.insert(topFolders, string.format("%s(%d)", c.Name, #c:GetChildren()))
+				end
+			end
+			table.insert(p1, "Workspace top-level: " .. table.concat(topFolders, ", "))
+			sendDump("💎 Diamond Scan (1/4): Currency, GUI, Remotes", p1, 0x5DADE2)
+
+			--// Part 2+3: Live capture — new objects spawned + currency changes
+			local spawned = {} -- inst -> record
+			local spawnOrder = {}
+			local events = {}
+			local conns = {}
+			local startT = os.clock()
+			local function stamp()
+				return string.format("%5.1fs", os.clock() - startT)
+			end
+			local function isInCharacter(inst)
+				for _, plr in ipairs(Players:GetPlayers()) do
+					if plr.Character and inst:IsDescendantOf(plr.Character) then
+						return true
+					end
+				end
+				return false
+			end
+			local function isUnderRecorded(inst)
+				local p = inst.Parent
+				while p and p ~= workspace do
+					if spawned[p] then
+						return true
+					end
+					p = p.Parent
+				end
+				return false
+			end
+
+			table.insert(conns, workspace.DescendantAdded:Connect(function(inst)
+				if not (inst:IsA("BasePart") or inst:IsA("Model")) then
+					return
+				end
+				task.defer(function()
+					if not inst.Parent or isInCharacter(inst) or isUnderRecorded(inst) then
+						return
+					end
+					local animalPickups = workspace:FindFirstChild("AnimalPickups")
+					if animalPickups and inst:IsDescendantOf(animalPickups) then
+						return
+					end
+					local pos = instPos(inst)
+					local rec = {
+						inst = inst,
+						name = inst.Name,
+						class = inst.ClassName,
+						path = shortPath(inst),
+						t = os.clock() - startT,
+						spawnDist = distTo(pos),
+						attrs = attrString(inst),
+						children = childSummary(inst),
+						part = partInfo(inst),
+						diamondish = isDiamondish(inst.Name) or isDiamondish(attrString(inst)),
+					}
+					spawned[inst] = rec
+					table.insert(spawnOrder, rec)
+					local lastPos = pos
+					local trackConn
+					trackConn = RunService.Heartbeat:Connect(function()
+						if inst.Parent then
+							lastPos = instPos(inst) or lastPos
+						end
+					end)
+					table.insert(conns, trackConn)
+					table.insert(conns, inst.AncestryChanged:Connect(function(_, parent)
+						if parent == nil and not rec.removedAt then
+							rec.removedAt = os.clock() - startT
+							rec.removeDist = distTo(lastPos)
+							trackConn:Disconnect()
+						end
+					end))
 				end)
-				table.insert(conns, trackConn)
-				table.insert(conns, inst.AncestryChanged:Connect(function(_, parent)
-					if parent == nil and not rec.removedAt then
-						rec.removedAt = os.clock() - startT
-						rec.removeDist = distTo(lastPos)
-						trackConn:Disconnect()
+			end))
+
+			local function watchValue(label, getter, signal)
+				local last = getter()
+				table.insert(conns, signal:Connect(function()
+					local now = getter()
+					if tostring(now) ~= tostring(last) then
+						table.insert(events, string.format("[%s] %s: %s -> %s", stamp(), label, tostring(last), tostring(now)))
+						last = now
 					end
 				end))
-			end)
-		end))
-
-		local function watchValue(label, getter, signal)
-			local last = getter()
-			table.insert(conns, signal:Connect(function()
-				local now = getter()
-				if tostring(now) ~= tostring(last) then
-					table.insert(events, string.format("[%s] %s: %s -> %s", stamp(), label, tostring(last), tostring(now)))
-					last = now
+			end
+			table.insert(conns, player.AttributeChanged:Connect(function(attrName)
+				if isDiamondish(attrName) or matchesKeyword(attrName) then
+					table.insert(events, string.format("[%s] PlayerAttr %s = %s", stamp(), attrName, tostring(player:GetAttribute(attrName))))
 				end
 			end))
-		end
-		table.insert(conns, player.AttributeChanged:Connect(function(attrName)
-			if isDiamondish(attrName) or matchesKeyword(attrName) then
-				table.insert(events, string.format("[%s] PlayerAttr %s = %s", stamp(), attrName, tostring(player:GetAttribute(attrName))))
+			for _, d in ipairs(player:GetDescendants()) do
+				if d:IsA("ValueBase") and (isDiamondish(d.Name) or (ls and d.Parent == ls)) then
+					watchValue("Value " .. d.Name, function()
+						return d.Value
+					end, d.Changed)
+				end
 			end
-		end))
-		for _, d in ipairs(player:GetDescendants()) do
-			if d:IsA("ValueBase") and (isDiamondish(d.Name) or (ls and d.Parent == ls)) then
-				watchValue("Value " .. d.Name, function()
-					return d.Value
-				end, d.Changed)
+			for _, lbl in ipairs(guiWatch) do
+				watchValue("GUI " .. lbl.Name, function()
+					return lbl.Text
+				end, lbl:GetPropertyChangedSignal("Text"))
 			end
-		end
-		for _, lbl in ipairs(guiWatch) do
-			watchValue("GUI " .. lbl.Name, function()
-				return lbl.Text
-			end, lbl:GetPropertyChangedSignal("Text"))
-		end
-		for _, d in ipairs(ReplicatedStorage:GetDescendants()) do
-			if d:IsA("RemoteEvent") and matchesKeyword(d.Name) then
-				table.insert(conns, d.OnClientEvent:Connect(function(...)
-					local args = {}
-					for i, a in ipairs({ ... }) do
-						if i > 4 then
-							break
+			for _, d in ipairs(ReplicatedStorage:GetDescendants()) do
+				if d:IsA("RemoteEvent") and matchesKeyword(d.Name) then
+					table.insert(conns, d.OnClientEvent:Connect(function(...)
+						local args = {}
+						for i, a in ipairs({ ... }) do
+							if i > 4 then
+								break
+							end
+							local s = typeof(a) == "Instance" and shortPath(a) or tostring(a)
+							table.insert(args, s:sub(1, 40))
 						end
-						local s = typeof(a) == "Instance" and shortPath(a) or tostring(a)
-						table.insert(args, s:sub(1, 40))
-					end
-					table.insert(events, string.format("[%s] Remote %s(%s)", stamp(), d.Name, table.concat(args, ", ")))
-				end))
+						table.insert(events, string.format("[%s] Remote %s(%s)", stamp(), d.Name, table.concat(args, ", ")))
+					end))
+				end
 			end
-		end
 
-		local captureSeconds = 60
-		local lastNotified = 0
-		while os.clock() - startT < captureSeconds and not Library.Unloaded do
-			task.wait(1)
-			local elapsed = math.floor(os.clock() - startT)
-			if elapsed - lastNotified >= 20 and elapsed < captureSeconds then
-				lastNotified = elapsed
-				Library:Notify(string.format("Diamond scan: %ds left, %d new objects seen", captureSeconds - elapsed, #spawnOrder), 2)
+			local captureSeconds = 60
+			local lastNotified = 0
+			while os.clock() - startT < captureSeconds and not Library.Unloaded do
+				task.wait(1)
+				local elapsed = math.floor(os.clock() - startT)
+				if elapsed - lastNotified >= 20 and elapsed < captureSeconds then
+					lastNotified = elapsed
+					Library:Notify(string.format("Diamond scan: %ds left, %d new objects seen", captureSeconds - elapsed, #spawnOrder), 2)
+				end
 			end
-		end
-		task.wait(2) -- let removal events settle
-		for _, c in ipairs(conns) do
-			pcall(function()
-				c:Disconnect()
+			task.wait(2) -- let removal events settle
+			for _, c in ipairs(conns) do
+				pcall(function()
+					c:Disconnect()
+				end)
+			end
+
+			-- Part 2: summary grouped by name
+			local groups, groupOrder = {}, {}
+			for _, rec in ipairs(spawnOrder) do
+				local key = rec.name .. " (" .. rec.class .. ")"
+				local g = groups[key]
+				if not g then
+					g = { key = key, count = 0, removed = 0, parent = rec.path:match("^(.*)%.[^%.]+$") or "?", diamondish = rec.diamondish }
+					groups[key] = g
+					table.insert(groupOrder, g)
+				end
+				g.count += 1
+				if rec.removedAt then
+					g.removed += 1
+				end
+			end
+			table.sort(groupOrder, function(a, b)
+				if a.diamondish ~= b.diamondish then
+					return a.diamondish and true or false
+				end
+				return a.count > b.count
 			end)
-		end
+			local p2 = { string.format("New objects in %ds: %d (unique names: %d)", captureSeconds, #spawnOrder, #groupOrder) }
+			for i, g in ipairs(groupOrder) do
+				if i > 40 then
+					break
+				end
+				table.insert(p2, string.format("%s%s x%d (removed %d) in %s", g.diamondish and "💎 " or "", g.key, g.count, g.removed, g.parent))
+			end
+			sendDump("💎 Diamond Scan (2/4): New Objects Summary", p2, 0x5DADE2)
 
-		-- Part 2: summary grouped by name
-		local groups, groupOrder = {}, {}
-		for _, rec in ipairs(spawnOrder) do
-			local key = rec.name .. " (" .. rec.class .. ")"
-			local g = groups[key]
-			if not g then
-				g = { key = key, count = 0, removed = 0, parent = rec.path:match("^(.*)%.[^%.]+$") or "?", diamondish = rec.diamondish }
-				groups[key] = g
-				table.insert(groupOrder, g)
+			-- Part 3: detailed records (diamond-like first, then first sample of each unique name)
+			local p3 = {}
+			local seenNames = {}
+			local detailed = {}
+			for _, rec in ipairs(spawnOrder) do
+				if rec.diamondish then
+					table.insert(detailed, rec)
+					seenNames[rec.name] = true
+				end
 			end
-			g.count += 1
-			if rec.removedAt then
-				g.removed += 1
+			for _, rec in ipairs(spawnOrder) do
+				if not seenNames[rec.name] then
+					seenNames[rec.name] = true
+					table.insert(detailed, rec)
+				end
 			end
-		end
-		table.sort(groupOrder, function(a, b)
-			if a.diamondish ~= b.diamondish then
-				return a.diamondish and true or false
+			for i, rec in ipairs(detailed) do
+				if i > 14 then
+					break
+				end
+				table.insert(p3, string.format(
+					"[%5.1fs] %s (%s)\n  path=%s\n  spawnDist=%.0f removed=%s removeDist=%s\n  %s %s\n  %s",
+					rec.t,
+					rec.name,
+					rec.class,
+					rec.path,
+					rec.spawnDist,
+					rec.removedAt and string.format("%.1fs (life %.1fs)", rec.removedAt, rec.removedAt - rec.t) or "no",
+					rec.removeDist and string.format("%.1f", rec.removeDist) or "-",
+					rec.part,
+					rec.attrs,
+					rec.children
+				))
 			end
-			return a.count > b.count
+			sendDump("💎 Diamond Scan (3/4): Object Details", p3, 0x5DADE2)
+
+			-- Part 4: currency / GUI / remote event timeline
+			local p4 = { string.format("Events captured: %d", #events) }
+			for i, e in ipairs(events) do
+				if i > 45 then
+					break
+				end
+				table.insert(p4, e)
+			end
+			sendDump("💎 Diamond Scan (4/4): Currency & Remote Timeline", p4, 0x5DADE2)
+
+			diamondScanRunning = false
+			Library:Notify("Diamond scan complete! Check your Discord webhook.", 4)
 		end)
-		local p2 = { string.format("New objects in %ds: %d (unique names: %d)", captureSeconds, #spawnOrder, #groupOrder) }
-		for i, g in ipairs(groupOrder) do
-			if i > 40 then
-				break
-			end
-			table.insert(p2, string.format("%s%s x%d (removed %d) in %s", g.diamondish and "💎 " or "", g.key, g.count, g.removed, g.parent))
-		end
-		sendDump("💎 Diamond Scan (2/4): New Objects Summary", p2, 0x5DADE2)
-
-		-- Part 3: detailed records (diamond-like first, then first sample of each unique name)
-		local p3 = {}
-		local seenNames = {}
-		local detailed = {}
-		for _, rec in ipairs(spawnOrder) do
-			if rec.diamondish then
-				table.insert(detailed, rec)
-				seenNames[rec.name] = true
-			end
-		end
-		for _, rec in ipairs(spawnOrder) do
-			if not seenNames[rec.name] then
-				seenNames[rec.name] = true
-				table.insert(detailed, rec)
-			end
-		end
-		for i, rec in ipairs(detailed) do
-			if i > 14 then
-				break
-			end
-			table.insert(p3, string.format(
-				"[%5.1fs] %s (%s)\n  path=%s\n  spawnDist=%.0f removed=%s removeDist=%s\n  %s %s\n  %s",
-				rec.t,
-				rec.name,
-				rec.class,
-				rec.path,
-				rec.spawnDist,
-				rec.removedAt and string.format("%.1fs (life %.1fs)", rec.removedAt, rec.removedAt - rec.t) or "no",
-				rec.removeDist and string.format("%.1f", rec.removeDist) or "-",
-				rec.part,
-				rec.attrs,
-				rec.children
-			))
-		end
-		sendDump("💎 Diamond Scan (3/4): Object Details", p3, 0x5DADE2)
-
-		-- Part 4: currency / GUI / remote event timeline
-		local p4 = { string.format("Events captured: %d", #events) }
-		for i, e in ipairs(events) do
-			if i > 45 then
-				break
-			end
-			table.insert(p4, e)
-		end
-		sendDump("💎 Diamond Scan (4/4): Currency & Remote Timeline", p4, 0x5DADE2)
-
-		diamondScanRunning = false
-		Library:Notify("Diamond scan complete! Check your Discord webhook.", 4)
 	end)
-end)
+end
 
 --============================================================================--
 --// Safe Auto-Progression Engine (Pet, Pickaxe, Trail, Plot, Treadmill)
@@ -2666,6 +2668,22 @@ do
 	local registeredEggTypes = {}
 	local skippedEggs = {}
 	local FARM_RENDER_STEP = "AllainZoneAutoFarmMove"
+	-- Small scalar state grouped in one table: executor compilers cap a function at 200 live locals,
+	-- and this block plus the top-level chunk sits right at that limit.
+	local farmVars = {
+		lastSlotPress = 0,
+		PICKAXE_EQUIP_DELAY = 1,
+		cachedThreats = {},
+		cachedThreatsAt = 0,
+		lastGuardedCount = 0,
+		ZONE_POS_FILE = "AllainAutomation/wasd/zone_positions.json",
+		zonePositionsDirty = false,
+		lastZonePosSave = 0,
+		lastZoneEggCount = 0,
+		worstPlotCache = nil,
+		worstPlotCacheAt = 0,
+		lastStreamRequest = 0,
+	}
 
 	-- The movement engine runs for Zone Auto-Farm and for Auto-Take Hatched Pets
 	local function isFarmActive()
@@ -2791,8 +2809,6 @@ do
 
 	-- Guardrail: the in-game Auto Swing only breaks eggs with the pickaxe (hotbar slot 1) in hand,
 	-- so switch back to it whenever another slot (or nothing) is held. Returns true when it had to switch.
-	local lastSlotPress = 0
-	local PICKAXE_EQUIP_DELAY = 1
 
 	local function isPickaxe(tool)
 		return tool ~= nil and (tool == autoFarm.PickaxeTool or tool.Name:lower():find("pickaxe") ~= nil)
@@ -2810,7 +2826,7 @@ do
 		if autoFarm.StateLabel then
 			autoFarm.StateLabel:SetText("Farm State: Equipping pickaxe in 1s...")
 		end
-		task.wait(PICKAXE_EQUIP_DELAY)
+		task.wait(farmVars.PICKAXE_EQUIP_DELAY)
 		if not autoFarm.Enabled or humanoid.Health <= 0 then
 			return false
 		end
@@ -2844,8 +2860,8 @@ do
 		end
 
 		-- Pickaxe name unknown: press hotbar slot 1 like the player would, then remember what it equipped
-		if os.clock() - lastSlotPress < 1.5 then return false end
-		lastSlotPress = os.clock()
+		if os.clock() - farmVars.lastSlotPress < 1.5 then return false end
+		farmVars.lastSlotPress = os.clock()
 		if heldTool then
 			-- Put the other tool away first so pressing 1 equips instead of toggling
 			pcall(function()
@@ -2865,15 +2881,13 @@ do
 	end
 
 	--// Guard Avoidance \\--
-	local cachedThreats, cachedThreatsAt = {}, 0
-	local lastGuardedCount = 0
 
 	local function getGuardThreats()
 		if not autoFarm.AvoidGuards or not autoFarm.CollectGuards then
 			return {}
 		end
-		if os.clock() - cachedThreatsAt < 0.2 then
-			return cachedThreats
+		if os.clock() - farmVars.cachedThreatsAt < 0.2 then
+			return farmVars.cachedThreats
 		end
 
 		local threats = {}
@@ -2896,7 +2910,7 @@ do
 			end
 		end
 
-		cachedThreats, cachedThreatsAt = threats, os.clock()
+		farmVars.cachedThreats, farmVars.cachedThreatsAt = threats, os.clock()
 		return threats
 	end
 
@@ -2964,32 +2978,28 @@ do
 	end
 
 	--// Zone streaming: remember where each zone is, so zones that are not streamed in yet can be loaded \\--
-	local ZONE_POS_FILE = "AllainAutomation/wasd/zone_positions.json"
 	local zonePositions = {}
-	local zonePositionsDirty = false
-	local lastZonePosSave = 0
-	local lastZoneEggCount = 0
 
 	pcall(function()
-		if isfile and readfile and isfile(ZONE_POS_FILE) then
-			for name, xyz in pairs(HttpService:JSONDecode(readfile(ZONE_POS_FILE))) do
+		if isfile and readfile and isfile(farmVars.ZONE_POS_FILE) then
+			for name, xyz in pairs(HttpService:JSONDecode(readfile(farmVars.ZONE_POS_FILE))) do
 				zonePositions[name] = Vector3.new(xyz[1], xyz[2], xyz[3])
 			end
 		end
 	end)
 
 	local function saveZonePositions()
-		if not zonePositionsDirty or not writefile or os.clock() - lastZonePosSave < 10 then
+		if not farmVars.zonePositionsDirty or not writefile or os.clock() - farmVars.lastZonePosSave < 10 then
 			return
 		end
-		zonePositionsDirty = false
-		lastZonePosSave = os.clock()
+		farmVars.zonePositionsDirty = false
+		farmVars.lastZonePosSave = os.clock()
 		pcall(function()
 			local data = {}
 			for name, pos in pairs(zonePositions) do
 				data[name] = { pos.X, pos.Y, pos.Z }
 			end
-			writefile(ZONE_POS_FILE, HttpService:JSONEncode(data))
+			writefile(farmVars.ZONE_POS_FILE, HttpService:JSONEncode(data))
 		end)
 	end
 
@@ -3011,7 +3021,7 @@ do
 		end
 		if count > 0 then
 			zonePositions[zoneName] = sum / count
-			zonePositionsDirty = true
+			farmVars.zonePositionsDirty = true
 		end
 	end
 
@@ -3080,8 +3090,8 @@ do
 			end
 		end
 
-		lastGuardedCount = guardedCount
-		lastZoneEggCount = zoneEggCount
+		farmVars.lastGuardedCount = guardedCount
+		farmVars.lastZoneEggCount = zoneEggCount
 		saveZonePositions()
 		if #candidates == 0 then
 			return nil
@@ -3374,10 +3384,9 @@ do
 	end
 
 	-- Lowest-earning pet on my plot (0 when there is a free slot); nil when it cannot be read
-	local worstPlotCache, worstPlotCacheAt = nil, 0
 	local function getWorstPlotPet()
-		if worstPlotCache and os.clock() - worstPlotCacheAt < 2 then
-			return worstPlotCache.cps, worstPlotCache.name
+		if farmVars.worstPlotCache and os.clock() - farmVars.worstPlotCacheAt < 2 then
+			return farmVars.worstPlotCache.cps, farmVars.worstPlotCache.name
 		end
 		local plot = findOwnedPlot()
 		if not plot then
@@ -3399,7 +3408,7 @@ do
 			end
 		end
 
-		worstPlotCache, worstPlotCacheAt = cps and { cps = cps, name = name } or nil, os.clock()
+		farmVars.worstPlotCache, farmVars.worstPlotCacheAt = cps and { cps = cps, name = name } or nil, os.clock()
 		return cps, name
 	end
 	autoFarm.GetWorstPlotPet = getWorstPlotPet
@@ -3595,7 +3604,7 @@ do
 
 		autoFarm.PetsTaken += 1
 		setFarmTarget(string.format("Pet: Took %s ($%s/s)!", pet.name, formatAbbreviatedNumber(pet.cps)))
-		worstPlotCache = nil
+		farmVars.worstPlotCache = nil
 
 		task.wait(0.4)
 		if autoFarm.TakeReturnToPlot and isCarryingPet(player.Character) then
@@ -3644,7 +3653,6 @@ do
 
 	-- The selected zone has no eggs streamed in (e.g. starting from the plot): ask Roblox to stream that area in,
 	-- and if that is not enough, run toward the zone at normal speed until its eggs load
-	local lastStreamRequest = 0
 
 	local function selectedZoneHasEggs()
 		local build = workspace:FindFirstChild("Build")
@@ -3671,8 +3679,8 @@ do
 			return
 		end
 
-		if os.clock() - lastStreamRequest > 5 then
-			lastStreamRequest = os.clock()
+		if os.clock() - farmVars.lastStreamRequest > 5 then
+			farmVars.lastStreamRequest = os.clock()
 			setFarmTarget("Target: Loading " .. tostring(zoneName) .. "...")
 			setFarmState("Requesting zone to stream in...")
 			pcall(function()
@@ -3757,15 +3765,15 @@ do
 
 			-- 4. Select target egg
 			local egg, zoneName, eggName, luck, hp = findBestCandidateEgg(rootPart)
-			if not egg and lastZoneEggCount == 0 and autoFarm.Zone ~= "All Zones" and autoFarm.Zone ~= "" then
+			if not egg and farmVars.lastZoneEggCount == 0 and autoFarm.Zone ~= "All Zones" and autoFarm.Zone ~= "" then
 				loadSelectedZone(humanoid, rootPart)
 				continue
 			end
 			if not egg then
 				autoFarm.Target = nil
 				autoFarm.StopMoving()
-				if lastGuardedCount > 0 then
-					setFarmTarget(string.format("Target: %d egg(s) guarded, waiting...", lastGuardedCount))
+				if farmVars.lastGuardedCount > 0 then
+					setFarmTarget(string.format("Target: %d egg(s) guarded, waiting...", farmVars.lastGuardedCount))
 					setFarmState("Waiting for guards to leave...")
 				else
 					setFarmTarget("Target: None found in selected zone")
@@ -5614,34 +5622,37 @@ end)
 --// Toggle Feedback Notifications ("<Feature> Activated / Deactivated") \\--
 -- Wraps each toggle's RunChanged so it fires alongside the existing OnChanged handlers.
 -- Suppressed during startup autoload and manual config loads to avoid notification spam.
-local suppressToggleNotify = false
 do
-	local origLoad = SaveManager.Load
-	SaveManager.Load = function(self, ...)
-		suppressToggleNotify = true
-		local results = table.pack(pcall(origLoad, self, ...))
-		suppressToggleNotify = false
-		if not results[1] then
-			error(results[2], 0)
+	-- Scoped in a do-block to stay under the executor 200-local limit
+	local suppressToggleNotify = false
+	do
+		local origLoad = SaveManager.Load
+		SaveManager.Load = function(self, ...)
+			suppressToggleNotify = true
+			local results = table.pack(pcall(origLoad, self, ...))
+			suppressToggleNotify = false
+			if not results[1] then
+				error(results[2], 0)
+			end
+			return table.unpack(results, 2, results.n)
 		end
-		return table.unpack(results, 2, results.n)
-	end
 
-	for _, toggle in pairs(Toggles) do
-		local origRunChanged = toggle.RunChanged
-		local lastValue = toggle.Value
-		local label = tostring(toggle.Text or ""):gsub("^Enable%s+", "")
-		toggle.RunChanged = function(self, ...)
-			origRunChanged(self, ...)
-			local value = self.Value and true or false
-			if value == lastValue then
-				return
+		for _, toggle in pairs(Toggles) do
+			local origRunChanged = toggle.RunChanged
+			local lastValue = toggle.Value
+			local label = tostring(toggle.Text or ""):gsub("^Enable%s+", "")
+			toggle.RunChanged = function(self, ...)
+				origRunChanged(self, ...)
+				local value = self.Value and true or false
+				if value == lastValue then
+					return
+				end
+				lastValue = value
+				if isInitializingConfig or suppressToggleNotify or self.Disabled or label == "" then
+					return
+				end
+				Library:Notify(label .. (value and " Activated" or " Deactivated"), 2)
 			end
-			lastValue = value
-			if isInitializingConfig or suppressToggleNotify or self.Disabled or label == "" then
-				return
-			end
-			Library:Notify(label .. (value and " Activated" or " Deactivated"), 2)
 		end
 	end
 end
