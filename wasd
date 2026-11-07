@@ -204,6 +204,14 @@ local autoFarm = {
 	BestLuckName = nil,
 	ActiveSeconds = 0,
 	EnabledAt = nil,
+	TakeEnabled = false,
+	TakePets = {},
+	TakeRarities = {},
+	TakeMinCash = 0,
+	TakeBetterThanWorst = false,
+	TakeReturnToPlot = true,
+	PetsTaken = 0,
+	TakeFailed = 0,
 }
 
 local anchorPosition = nil
@@ -655,6 +663,57 @@ do
 		end
 	end)
 
+	autoFarm.TakeBox = Tabs.Automation:AddGroupbox({
+		Side = "Left",
+		Name = "Auto-Take Hatched Pets",
+		IconName = "hand",
+		Description = "Runs to hatched pets on the ground and holds E to take the ones you want.",
+	})
+
+	autoFarm.TakeBox:AddCheckbox("AutoTakeEnabled", {
+		Text = "Enable Auto-Take Pets",
+		Default = false,
+		Tooltip = "Takes matching hatched pets before they despawn; works alone or together with Zone Auto-Farm",
+	})
+
+	autoFarm.TakeBox:AddDropdown("AutoTakePets", {
+		Text = "Pet Filter",
+		Values = {},
+		Multi = true,
+		Searchable = true,
+		Default = {},
+		Tooltip = "Specific pets to take (fills in as pets hatch). Leave empty to allow any pet",
+	})
+
+	autoFarm.TakeBox:AddDropdown("AutoTakeRarities", {
+		Text = "Rarity Filter",
+		Values = table.clone(petRarityList),
+		Multi = true,
+		Searchable = true,
+		Default = {},
+		Tooltip = "Rarities to take. Leave empty to allow any rarity",
+	})
+
+	autoFarm.TakeBox:AddInput("AutoTakeMinCash", {
+		Text = "Min Cash/s (e.g. 500M, 10B, 50T)",
+		Default = "0",
+		Placeholder = "0 = Any (or 500M, 10B, 50T, 1Qa)",
+		ClearTextOnFocus = false,
+		Tooltip = "Only take pets earning at least this much per second",
+	})
+
+	autoFarm.TakeBox:AddCheckbox("AutoTakeBetterThanWorst", {
+		Text = "Only If Better Than My Worst Plot Pet",
+		Default = false,
+		Tooltip = "Only takes pets that earn more Cash/s than the lowest-earning pet on your plot (any pet counts while you have a free slot)",
+	})
+
+	autoFarm.TakeBox:AddCheckbox("AutoTakeReturnToPlot", {
+		Text = "Carry Taken Pet Back to Plot",
+		Default = true,
+		Tooltip = "If the game makes you carry the pet, runs back to your plot so it is banked",
+	})
+
 	local AutoStatusBox = Tabs.Automation:AddGroupbox({
 		Side = "Right",
 		Name = "Live Progression Status",
@@ -706,6 +765,11 @@ do
 
 	autoFarm.StatsLabel = AutoStatusBox:AddLabel("AutoFarmStatsLabel", {
 		Text = "Eggs Broken: 0 · Skipped: 0 · Guards Avoided: 0",
+		DoesWrap = true,
+	})
+
+	autoFarm.TakeStatsLabel = AutoStatusBox:AddLabel("AutoTakeStatsLabel", {
+		Text = "Auto-Take: Off",
 		DoesWrap = true,
 	})
 
@@ -2540,13 +2604,13 @@ end
 task.spawn(function()
 	while not Library.Unloaded do
 		if isRunning then
-			if autoFarm.Enabled then
+			if autoFarm.Enabled or autoFarm.TakeEnabled then
 				highlightKey(nil)
 				task.wait(0.4)
 				continue
 			end
 			for _, dir in ipairs(directions) do
-				if not isRunning or Library.Unloaded or autoFarm.Enabled then
+				if not isRunning or Library.Unloaded or autoFarm.Enabled or autoFarm.TakeEnabled then
 					break
 				end
 				StatusLabel:SetText("Status: Moving " .. dir.label)
@@ -2556,17 +2620,17 @@ task.spawn(function()
 			end
 			highlightKey(nil)
 
-			if isRunning and not Library.Unloaded and not autoFarm.Enabled then
+			if isRunning and not Library.Unloaded and not (autoFarm.Enabled or autoFarm.TakeEnabled) then
 				returnToAnchor()
 				completedCycles += 1
 				CyclesLabel:SetText("Cycles Completed: " .. tostring(completedCycles))
 			end
 
-			if isRunning and not Library.Unloaded and pauseDuration > 0 and not autoFarm.Enabled then
+			if isRunning and not Library.Unloaded and pauseDuration > 0 and not (autoFarm.Enabled or autoFarm.TakeEnabled) then
 				StatusLabel:SetText(string.format("Status: Waiting (%.1fs)", pauseDuration))
 				local waitStart = os.clock()
 				while isRunning and not Library.Unloaded and (os.clock() - waitStart) < pauseDuration do
-					if autoFarm.Enabled then
+					if autoFarm.Enabled or autoFarm.TakeEnabled then
 						break
 					end
 					task.wait(0.1)
@@ -2588,12 +2652,17 @@ do
 	local skippedEggs = {}
 	local FARM_RENDER_STEP = "AllainZoneAutoFarmMove"
 
+	-- The movement engine runs for Zone Auto-Farm and for Auto-Take Hatched Pets
+	local function isFarmActive()
+		return autoFarm.Enabled or autoFarm.TakeEnabled
+	end
+
 	-- The default ControlModule calls Humanoid:Move every frame at Input priority, which zeroes any
 	-- direction set from Heartbeat (the character never ran). Steering after it, at Character priority,
 	-- keeps our direction applied so the character runs at its full in-game WalkSpeed.
 	local function applyFarmMove()
 		local dir = autoFarm.MoveDir
-		if not dir or not autoFarm.Enabled then
+		if not dir or not isFarmActive() then
 			return
 		end
 		local char = player.Character
@@ -2705,25 +2774,64 @@ do
 		return false
 	end
 
+	-- Guardrail: the in-game Auto Swing only breaks eggs with the pickaxe (hotbar slot 1) in hand,
+	-- so switch back to it whenever another slot (or nothing) is held. Returns true when it had to switch.
+	local lastSlotPress = 0
+
+	local function isPickaxe(tool)
+		return tool ~= nil and (tool == autoFarm.PickaxeTool or tool.Name:lower():find("pickaxe") ~= nil)
+	end
+
 	local function ensurePickaxeEquipped(character, humanoid)
-		if not character or not humanoid then return end
+		if not character or not humanoid then return false end
 		local heldTool = character:FindFirstChildOfClass("Tool")
-		if heldTool then return end
+		if isPickaxe(heldTool) then
+			autoFarm.PickaxeTool = heldTool
+			return false
+		end
+
 		local backpack = player:FindFirstChild("Backpack")
-		if not backpack then return end
-		local bestTool = nil
-		for _, t in ipairs(backpack:GetChildren()) do
-			if t:IsA("Tool") then
-				if not bestTool or t.Name:lower():find("pickaxe") then
-					bestTool = t
+		local pickaxe = nil
+		if backpack then
+			if autoFarm.PickaxeTool and autoFarm.PickaxeTool.Parent == backpack then
+				pickaxe = autoFarm.PickaxeTool
+			else
+				for _, t in ipairs(backpack:GetChildren()) do
+					if t:IsA("Tool") and t.Name:lower():find("pickaxe") then
+						pickaxe = t
+						break
+					end
 				end
 			end
 		end
-		if bestTool then
+
+		if pickaxe then
+			-- EquipTool also puts away whatever slot is currently held
 			pcall(function()
-				humanoid:EquipTool(bestTool)
+				humanoid:EquipTool(pickaxe)
 			end)
+			return true
 		end
+
+		-- Pickaxe name unknown: press hotbar slot 1 like the player would, then remember what it equipped
+		if os.clock() - lastSlotPress < 1.5 then return false end
+		lastSlotPress = os.clock()
+		if heldTool then
+			-- Put the other tool away first so pressing 1 equips instead of toggling
+			pcall(function()
+				humanoid:UnequipTools()
+			end)
+			task.wait(0.05)
+		end
+		sendKeyState(Enum.KeyCode.One, true)
+		task.wait(0.05)
+		sendKeyState(Enum.KeyCode.One, false)
+		task.wait(0.2)
+		local nowHeld = character:FindFirstChildOfClass("Tool")
+		if nowHeld then
+			autoFarm.PickaxeTool = nowHeld
+		end
+		return true
 	end
 
 	--// Guard Avoidance \\--
@@ -2969,7 +3077,7 @@ do
 	-- Run directly away from a guard until we are well outside the safe distance (max 1.5s)
 	local function retreatFromGuard(humanoid, rootPart, guardPos)
 		local retreatUntil = os.clock() + 1.5
-		while autoFarm.Enabled and not Library.Unloaded and humanoid.Health > 0 and os.clock() < retreatUntil do
+		while isFarmActive() and not Library.Unloaded and humanoid.Health > 0 and os.clock() < retreatUntil do
 			local away = flatDelta(guardPos, rootPart.Position)
 			if away.Magnitude >= autoFarm.GuardDistance * 1.3 then
 				break
@@ -3048,12 +3156,348 @@ do
 		end
 	end)
 
+	--// Shared full-speed runner (used for eggs, hatched pets and returning to plot) \\--
+	-- Returns "arrived", "stuck", "guard" (+ threat) or "stopped" (target gone, farm off, died)
+	local function runToTarget(humanoid, rootPart, getPos, reach, stillValid, label)
+		local startDist = flatDelta(rootPart.Position, getPos()).Magnitude
+		local runDeadline = os.clock() + (startDist / math.max(humanoid.WalkSpeed, 16)) * 2 + 6
+		local lastProgressPos = rootPart.Position
+		local lastProgressTime = os.clock()
+		local stuckJumps = 0
+		local lastLabelUpdate = 0
+
+		while isFarmActive() and not Library.Unloaded and humanoid.Health > 0 and rootPart.Parent and stillValid() do
+			local delta = flatDelta(rootPart.Position, getPos())
+			local dist = delta.Magnitude
+			if dist <= reach then
+				autoFarm.StopMoving()
+				return "arrived"
+			end
+
+			local threat = findGuardThreat(getGuardThreats(), rootPart.Position)
+			if threat then
+				autoFarm.StopMoving()
+				return "guard", threat
+			end
+
+			autoFarm.MoveDir = delta.Unit
+
+			if os.clock() - lastLabelUpdate > 0.25 then
+				lastLabelUpdate = os.clock()
+				setFarmState(string.format("Running to %s (%dm @ %d spd)", label, math.floor(dist + 0.5), math.floor(humanoid.WalkSpeed + 0.5)))
+			end
+
+			-- Unstuck handling: jump when blocked, give up on targets we cannot reach
+			if (rootPart.Position - lastProgressPos).Magnitude > 2 then
+				lastProgressPos = rootPart.Position
+				lastProgressTime = os.clock()
+			elseif (os.clock() - lastProgressTime) > 1 then
+				humanoid.Jump = true
+				stuckJumps += 1
+				lastProgressPos = rootPart.Position
+				lastProgressTime = os.clock()
+			end
+
+			if stuckJumps >= 4 or os.clock() > runDeadline then
+				autoFarm.StopMoving()
+				return "stuck"
+			end
+
+			RunService.Heartbeat:Wait()
+		end
+
+		autoFarm.StopMoving()
+		return "stopped"
+	end
+
+	--// Auto-Take Hatched Pets \\--
+	local skippedPets = {}
+	local knownTakeNames = {}
+
+	local function findOwnedPlot()
+		local plotsFolder = workspace:FindFirstChild("Plots")
+		if plotsFolder then
+			for _, plot in ipairs(plotsFolder:GetChildren()) do
+				if plot:GetAttribute("OwnerUserId") == player.UserId then
+					return plot
+				end
+			end
+		end
+		return nil
+	end
+
+	local function getPetRoot(petModel)
+		if petModel:IsA("BasePart") then
+			return petModel
+		end
+		return petModel:FindFirstChild("RootPart") or petModel.PrimaryPart or petModel:FindFirstChildWhichIsA("BasePart")
+	end
+
+	-- Cash/s from an attribute when the game provides one, otherwise from the overhead "$X/s" label
+	local function readPetCashPerSecond(petModel)
+		for _, key in ipairs({ "CashPerSecond", "IncomePerSecond", "CashPerSec" }) do
+			local attr = petModel:GetAttribute(key)
+			if typeof(attr) == "number" then
+				return attr
+			end
+		end
+		local attachment = petModel:FindFirstChild("AnimalOverheadAttachment", true)
+		if attachment and autoFarm.ReadPetOverhead then
+			local cpsText = autoFarm.ReadPetOverhead(petModel, attachment.Parent)
+			if cpsText and cpsText ~= "" then
+				return parseAbbreviatedNumber((cpsText:gsub("/[sS]", "")))
+			end
+		end
+		return nil
+	end
+
+	local function getPetName(petModel)
+		local named = petModel:GetAttribute("AnimalName") and petModel or petModel:FindFirstChildWhichIsA("Model")
+		return tostring(named and named:GetAttribute("AnimalName") or petModel.Name)
+	end
+
+	-- Lowest-earning pet on my plot (0 when there is a free slot); nil when it cannot be read
+	local worstPlotCache, worstPlotCacheAt = nil, 0
+	local function getWorstPlotPet()
+		if worstPlotCache and os.clock() - worstPlotCacheAt < 2 then
+			return worstPlotCache.cps, worstPlotCache.name
+		end
+		local plot = findOwnedPlot()
+		if not plot then
+			return nil
+		end
+
+		local cps, name = nil, nil
+		local placed = tonumber(plot:GetAttribute("AnimalsPlaced")) or 0
+		local maxPlaced = tonumber(plot:GetAttribute("MaxAnimals")) or 16
+		if placed < maxPlaced then
+			cps, name = 0, "Free slot"
+		else
+			local folder = plot:FindFirstChild("PlacedAnimals")
+			for _, petModel in ipairs(folder and folder:GetChildren() or {}) do
+				local petCps = readPetCashPerSecond(petModel)
+				if petCps and (not cps or petCps < cps) then
+					cps, name = petCps, getPetName(petModel)
+				end
+			end
+		end
+
+		worstPlotCache, worstPlotCacheAt = cps and { cps = cps, name = name } or nil, os.clock()
+		return cps, name
+	end
+	autoFarm.GetWorstPlotPet = getWorstPlotPet
+
+	local function isSelected(value, selectedTable)
+		if not selectedTable or next(selectedTable) == nil then
+			return true
+		end
+		local lower = tostring(value):lower()
+		for key, on in pairs(selectedTable) do
+			if on and typeof(key) == "string" and key:lower() == lower then
+				return true
+			end
+		end
+		return false
+	end
+
+	local function registerDropdownValue(dropdown, value)
+		if dropdown and value ~= "" and not table.find(dropdown.Values or {}, value) then
+			pcall(function()
+				dropdown:AddValues(value)
+			end)
+		end
+	end
+
+	local function findBestPickupPet(rootPart, walkSpeed)
+		local pickups = workspace:FindFirstChild("AnimalPickups")
+		if not pickups then
+			return nil
+		end
+
+		local worstCps = nil
+		if autoFarm.TakeBetterThanWorst then
+			worstCps = getWorstPlotPet()
+			if not worstCps then
+				-- Cannot compare safely, so take nothing rather than a worse pet
+				return nil
+			end
+		end
+
+		local threats = getGuardThreats()
+		local okNow, serverNow = pcall(function()
+			return workspace:GetServerTimeNow()
+		end)
+		local best = nil
+
+		for _, petModel in ipairs(pickups:GetChildren()) do
+			local petRoot = getPetRoot(petModel)
+			local skipUntil = skippedPets[petModel]
+			if skipUntil and os.clock() >= skipUntil then
+				skippedPets[petModel] = nil
+				skipUntil = nil
+			end
+
+			if petRoot and petRoot:IsA("BasePart") and not skipUntil then
+				local name = getPetName(petModel)
+				local rarity = tostring(petModel:GetAttribute("Rarity") or "")
+				if not knownTakeNames[name] then
+					knownTakeNames[name] = true
+					registerDropdownValue(Options.AutoTakePets, name)
+				end
+				registerDropdownValue(Options.AutoTakeRarities, rarity)
+
+				if isSelected(name, autoFarm.TakePets) and isSelected(rarity, autoFarm.TakeRarities) then
+					local cps = readPetCashPerSecond(petModel) or 0
+					if cps >= autoFarm.TakeMinCash and (not worstCps or cps > worstCps) then
+						local dist = flatDelta(rootPart.Position, petRoot.Position).Magnitude
+						local despawnAt = tonumber(petModel:GetAttribute("DespawnAtServerTime"))
+						-- Leave pets that will despawn before we can reach them and hold E
+						local tooLate = okNow and despawnAt and (despawnAt - serverNow) < (dist / math.max(walkSpeed, 16) + 3)
+						local guarded = #threats > 0 and findGuardThreat(threats, petRoot.Position)
+						if not tooLate and not guarded then
+							if not best or cps > best.cps or (cps == best.cps and dist < best.dist) then
+								best = { model = petModel, root = petRoot, name = name, rarity = rarity, cps = cps, dist = dist }
+							end
+						end
+					end
+				end
+			end
+		end
+
+		return best
+	end
+
+	local function isCarryingPet(character)
+		for key, value in pairs(player:GetAttributes()) do
+			local k = tostring(key):lower()
+			if (k:find("carry") or k:find("holding")) and value ~= nil and value ~= false and value ~= "" and value ~= 0 then
+				return true
+			end
+		end
+		local ridingName = player:GetAttribute("RidingAnimal")
+		for _, child in ipairs(character and character:GetChildren() or {}) do
+			if child:IsA("Model") and child:GetAttribute("AnimalName") and child:GetAttribute("AnimalName") ~= ridingName then
+				return true
+			end
+		end
+		return false
+	end
+
+	-- If the game makes you carry the pet home, run it back to the plot so it gets banked
+	local function returnToPlot(humanoid, rootPart)
+		local plot = findOwnedPlot()
+		local target = plot and (plot:FindFirstChild("SpawnPoint") or plot:FindFirstChild("Hitbox"))
+		if not target then
+			return
+		end
+		local function carrying()
+			return isCarryingPet(player.Character)
+		end
+		for _ = 1, 3 do
+			local status, threat = runToTarget(humanoid, rootPart, function()
+				return target.Position
+			end, 4, carrying, "plot")
+			if status ~= "guard" then
+				break
+			end
+			retreatFromGuard(humanoid, rootPart, threat.pos)
+		end
+		local waitUntil = os.clock() + 5
+		while isFarmActive() and carrying() and os.clock() < waitUntil do
+			task.wait(0.2)
+		end
+	end
+
+	-- Taking a pet = stand next to it and hold E until the game removes it from AnimalPickups
+	local function takePet(humanoid, rootPart, pet)
+		local petModel, petRoot = pet.model, pet.root
+		local pickups = petModel.Parent
+		local function onGround()
+			return petModel.Parent == pickups and petRoot.Parent ~= nil
+		end
+
+		autoFarm.Target = petModel
+		setFarmTarget(string.format("Pet: %s (%s) — $%s/s", pet.name, pet.rarity, formatAbbreviatedNumber(pet.cps)))
+
+		local reach = math.max(4, math.max(petRoot.Size.X, petRoot.Size.Z) / 2 + 2)
+		local status, threat = runToTarget(humanoid, rootPart, function()
+			return petRoot.Position
+		end, reach, onGround, pet.name)
+
+		if status == "guard" then
+			skippedPets[petModel] = os.clock() + 10
+			autoFarm.GuardsAvoided += 1
+			updateFarmStats()
+			setFarmState("Avoiding guard!")
+			retreatFromGuard(humanoid, rootPart, threat.pos)
+			return
+		elseif status == "stuck" then
+			skippedPets[petModel] = os.clock() + 20
+			setFarmTarget("Pet: Unreachable, skipping...")
+			return
+		elseif status ~= "arrived" then
+			return
+		end
+
+		-- Real key hold only (no fireproximityprompt): the game sees a normal, full-length E press
+		setFarmState("Holding E on " .. pet.name .. "...")
+		sendKeyState(Enum.KeyCode.E, true)
+		local holdUntil = os.clock() + 8
+		while isFarmActive() and not Library.Unloaded and humanoid.Health > 0 and onGround() and os.clock() < holdUntil do
+			-- Stay in range without walking off (moving can cancel the hold)
+			if flatDelta(rootPart.Position, petRoot.Position).Magnitude > reach + 3 then
+				break
+			end
+			task.wait(0.05)
+		end
+		sendKeyState(Enum.KeyCode.E, false)
+
+		if onGround() then
+			skippedPets[petModel] = os.clock() + 30
+			autoFarm.TakeFailed += 1
+			setFarmTarget("Pet: Couldn't take " .. pet.name .. ", skipping...")
+			return
+		end
+
+		autoFarm.PetsTaken += 1
+		setFarmTarget(string.format("Pet: Took %s ($%s/s)!", pet.name, formatAbbreviatedNumber(pet.cps)))
+		worstPlotCache = nil
+
+		task.wait(0.4)
+		if autoFarm.TakeReturnToPlot and isCarryingPet(player.Character) then
+			returnToPlot(humanoid, rootPart)
+		end
+	end
+
+	-- Auto-Take status line, refreshed while the feature is on
+	task.spawn(function()
+		while not Library.Unloaded do
+			if autoFarm.TakeStatsLabel then
+				if autoFarm.TakeEnabled then
+					local worstCps, worstName = getWorstPlotPet()
+					local worstStr = worstCps
+						and string.format("$%s/s (%s)", formatAbbreviatedNumber(worstCps), tostring(worstName))
+						or "unreadable"
+					autoFarm.TakeStatsLabel:SetText(string.format(
+						"Pets Taken: %d · Failed: %d · Worst plot pet: %s",
+						autoFarm.PetsTaken,
+						autoFarm.TakeFailed,
+						worstStr
+					))
+				else
+					autoFarm.TakeStatsLabel:SetText("Auto-Take: Off")
+				end
+			end
+			task.wait(2)
+		end
+	end)
+
 	--// Main Zone Auto-Farm Loop \\--
 	task.spawn(function()
 		local lastAfkPulse = 0
 
 		while not Library.Unloaded do
-			if not autoFarm.Enabled then
+			if not isFarmActive() then
 				if autoFarm.Target or autoFarm.MoveDir then
 					autoFarm.Target = nil
 					autoFarm.StopMoving()
@@ -3074,16 +3518,33 @@ do
 				continue
 			end
 
-			-- 1. Ensure pickaxe is equipped so the in-game auto swing can hit
-			ensurePickaxeEquipped(character, humanoid)
-
-			-- 2. Anti-AFK pulse (throttled)
+			-- 1. Anti-AFK pulse (throttled)
 			if antiAfkEnabled and (os.clock() - lastAfkPulse) > 30 then
 				lastAfkPulse = os.clock()
 				pulseAntiAfk()
 			end
 
-			-- 3. Select target egg
+			-- 2. Hatched pets first: they despawn, eggs do not
+			if autoFarm.TakeEnabled then
+				local pet = findBestPickupPet(rootPart, humanoid.WalkSpeed)
+				if pet then
+					takePet(humanoid, rootPart, pet)
+					continue
+				end
+			end
+
+			if not autoFarm.Enabled then
+				autoFarm.Target = nil
+				setFarmTarget("Pet: Waiting for a matching hatched pet...")
+				setFarmState("Auto-Take watching for pets")
+				task.wait(0.3)
+				continue
+			end
+
+			-- 3. Ensure pickaxe is equipped so the in-game auto swing can hit
+			ensurePickaxeEquipped(character, humanoid)
+
+			-- 4. Select target egg
 			local egg, zoneName, eggName, luck, hp = findBestCandidateEgg(rootPart)
 			if not egg then
 				autoFarm.Target = nil
@@ -3106,57 +3567,14 @@ do
 
 			local reach = math.clamp(tonumber(autoFarm.Reach) or 7, 4, 15)
 
-			-- 4. Run to the egg at full native speed (direction is applied every frame by applyFarmMove)
-			local startDist = flatDelta(rootPart.Position, egg.Position).Magnitude
-			local runDeadline = os.clock() + (startDist / math.max(humanoid.WalkSpeed, 16)) * 2 + 6
-			local lastProgressPos = rootPart.Position
-			local lastProgressTime = os.clock()
-			local stuckJumps = 0
-			local lastLabelUpdate = 0
-			local gaveUp = false
-			local guardThreat = nil
+			-- 5. Run to the egg at full native speed (direction is applied every frame by applyFarmMove)
+			local status, guardThreat = runToTarget(humanoid, rootPart, function()
+				return egg.Position
+			end, reach, function()
+				return autoFarm.Enabled and isEggAlive(egg)
+			end, "egg")
 
-			while autoFarm.Enabled and not Library.Unloaded and humanoid.Health > 0 and rootPart.Parent and isEggAlive(egg) do
-				local delta = flatDelta(rootPart.Position, egg.Position)
-				local dist = delta.Magnitude
-				if dist <= reach then
-					break
-				end
-
-				guardThreat = findGuardThreat(getGuardThreats(), rootPart.Position)
-				if guardThreat then
-					break
-				end
-
-				autoFarm.MoveDir = delta.Unit
-
-				if os.clock() - lastLabelUpdate > 0.25 then
-					lastLabelUpdate = os.clock()
-					setFarmState(string.format("Running to egg (%dm @ %d spd)", math.floor(dist + 0.5), math.floor(humanoid.WalkSpeed + 0.5)))
-				end
-
-				-- Unstuck handling: jump when blocked, give up on eggs we cannot reach
-				if (rootPart.Position - lastProgressPos).Magnitude > 2 then
-					lastProgressPos = rootPart.Position
-					lastProgressTime = os.clock()
-				elseif (os.clock() - lastProgressTime) > 1 then
-					humanoid.Jump = true
-					stuckJumps += 1
-					lastProgressPos = rootPart.Position
-					lastProgressTime = os.clock()
-				end
-
-				if stuckJumps >= 4 or os.clock() > runDeadline then
-					gaveUp = true
-					break
-				end
-
-				RunService.Heartbeat:Wait()
-			end
-
-			autoFarm.StopMoving()
-
-			if gaveUp then
+			if status == "stuck" then
 				skippedEggs[egg] = os.clock() + 20
 				autoFarm.EggsSkipped += 1
 				updateFarmStats()
@@ -3165,13 +3583,14 @@ do
 				continue
 			end
 
-			-- 5. In range: wait while the in-game Auto Swing breaks the egg
+			-- 6. In range: wait while the in-game Auto Swing breaks the egg
 			local brokeInRange = false
-			if autoFarm.Enabled and isEggAlive(egg) and flatDelta(rootPart.Position, egg.Position).Magnitude <= reach + 2 then
+			if status == "arrived" and isEggAlive(egg) then
 				setFarmState("In Range (Auto-Swinging...)")
 				local lastHp = tonumber(egg:GetAttribute("Health"))
 				local lastHpChange = os.clock()
 				local lastNudge = os.clock()
+				local reequipped = false
 
 				while autoFarm.Enabled and not Library.Unloaded and humanoid.Health > 0 do
 					if not isEggAlive(egg) then
@@ -3186,6 +3605,17 @@ do
 					guardThreat = findGuardThreat(getGuardThreats(), rootPart.Position)
 					if guardThreat then
 						break
+					end
+
+					-- Player switched slots mid-break: re-equip the pickaxe, and don't count it as "no damage" time
+					if ensurePickaxeEquipped(character, humanoid) then
+						setFarmState("Re-equipping pickaxe...")
+						reequipped = true
+						lastHpChange = os.clock()
+						lastNudge = os.clock()
+					elseif reequipped then
+						setFarmState("In Range (Auto-Swinging...)")
+						reequipped = false
 					end
 
 					local hpNow = tonumber(egg:GetAttribute("Health"))
@@ -3212,7 +3642,7 @@ do
 				end
 			end
 
-			-- 6. A guard got close while running or breaking: back off and leave this egg for a while
+			-- 7. A guard got close while running or breaking: back off and leave this egg for a while
 			if guardThreat and not brokeInRange then
 				skippedEggs[egg] = os.clock() + 15
 				autoFarm.GuardsAvoided += 1
@@ -3223,7 +3653,7 @@ do
 				continue
 			end
 
-			-- 7. Egg broken!
+			-- 8. Egg broken!
 			if brokeInRange then
 				autoFarm.EggsBroken += 1
 				if luck > autoFarm.BestLuck or not autoFarm.BestLuckName then
@@ -3632,6 +4062,7 @@ local function extractPetOverheadInfo(petModel, rootPart)
 
 	return cashPerSecText, timerText, rarityText, mutationText
 end
+autoFarm.ReadPetOverhead = extractPetOverheadInfo
 
 local function isPetRarityAllowed(rarityStr)
 	if typeof(rarityStr) ~= "string" or rarityStr == "" then
@@ -4836,15 +5267,17 @@ Toggles.AutoFarmEnabled:OnChanged(function(Value)
 			autoFarm.ActiveSeconds += os.clock() - autoFarm.EnabledAt
 			autoFarm.EnabledAt = nil
 		end
-		autoFarm.Target = nil
-		if autoFarm.StopMoving then
-			autoFarm.StopMoving()
-		end
-		if autoFarm.StateLabel then
-			autoFarm.StateLabel:SetText("Farm State: Off")
-		end
-		if autoFarm.TargetLabel then
-			autoFarm.TargetLabel:SetText("Target: Idle")
+		if not autoFarm.TakeEnabled then
+			autoFarm.Target = nil
+			if autoFarm.StopMoving then
+				autoFarm.StopMoving()
+			end
+			if autoFarm.StateLabel then
+				autoFarm.StateLabel:SetText("Farm State: Off")
+			end
+			if autoFarm.TargetLabel then
+				autoFarm.TargetLabel:SetText("Target: Idle")
+			end
 		end
 	end
 	autoSaveActiveConfig()
@@ -4901,6 +5334,52 @@ Options.AutoFarmSummaryInterval:OnChanged(function(Value)
 	autoSaveActiveConfig()
 end)
 
+Toggles.AutoTakeEnabled:OnChanged(function(Value)
+	autoFarm.TakeEnabled = Value
+	if not Value and not autoFarm.Enabled then
+		autoFarm.Target = nil
+		if autoFarm.StopMoving then
+			autoFarm.StopMoving()
+		end
+		if autoFarm.StateLabel then
+			autoFarm.StateLabel:SetText("Farm State: Off")
+		end
+		if autoFarm.TargetLabel then
+			autoFarm.TargetLabel:SetText("Target: Idle")
+		end
+	end
+	autoSaveActiveConfig()
+end)
+
+Options.AutoTakePets:OnChanged(function(Value)
+	if typeof(Value) == "table" then
+		autoFarm.TakePets = Value
+	end
+	autoSaveActiveConfig()
+end)
+
+Options.AutoTakeRarities:OnChanged(function(Value)
+	if typeof(Value) == "table" then
+		autoFarm.TakeRarities = Value
+	end
+	autoSaveActiveConfig()
+end)
+
+Options.AutoTakeMinCash:OnChanged(function(Value)
+	autoFarm.TakeMinCash = parseCashFilterInput(tostring(Value or "0"))
+	autoSaveActiveConfig()
+end)
+
+Toggles.AutoTakeBetterThanWorst:OnChanged(function(Value)
+	autoFarm.TakeBetterThanWorst = Value
+	autoSaveActiveConfig()
+end)
+
+Toggles.AutoTakeReturnToPlot:OnChanged(function(Value)
+	autoFarm.TakeReturnToPlot = Value
+	autoSaveActiveConfig()
+end)
+
 --// Load Autoload Config on Startup \\--
 SaveManager:LoadAutoloadConfig()
 task.delay(0.6, function()
@@ -4939,6 +5418,7 @@ Library:OnUnload(function()
 	env.__AllainWASDLoading = false
 	isRunning = false
 	autoFarm.Enabled = false
+	autoFarm.TakeEnabled = false
 	autoFarm.Target = nil
 	if autoFarm.Cleanup then
 		pcall(autoFarm.Cleanup)
