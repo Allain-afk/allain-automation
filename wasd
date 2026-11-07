@@ -2832,6 +2832,8 @@ do
 	--// Auto-Take Hatched Pets \\--
 	local skippedPets = {}
 	local knownTakeNames = {}
+	-- Why the last scan picked nothing, shown in the status panel
+	local petScan = { total = 0, filtered = 0, lowCash = 0, notBetter = 0, guarded = 0, tooLate = 0, skipped = 0, worstUnreadable = false }
 
 	local function findOwnedPlot()
 		local plotsFolder = workspace:FindFirstChild("Plots")
@@ -2933,11 +2935,14 @@ do
 			return nil
 		end
 
+		petScan = { total = #pickups:GetChildren(), filtered = 0, lowCash = 0, notBetter = 0, guarded = 0, tooLate = 0, skipped = 0, worstUnreadable = false }
+
 		local worstCps = nil
 		if autoFarm.TakeBetterThanWorst then
 			worstCps = getWorstPlotPet()
 			if not worstCps then
 				-- Cannot compare safely, so take nothing rather than a worse pet
+				petScan.worstUnreadable = true
 				return nil
 			end
 		end
@@ -2956,6 +2961,10 @@ do
 				skipUntil = nil
 			end
 
+			if skipUntil then
+				petScan.skipped += 1
+			end
+
 			if petRoot and petRoot:IsA("BasePart") and not skipUntil then
 				local name = getPetName(petModel)
 				local rarity = tostring(petModel:GetAttribute("Rarity") or "")
@@ -2965,19 +2974,27 @@ do
 				end
 				registerDropdownValue(Options.AutoTakeRarities, rarity)
 
-				if isSelected(name, autoFarm.TakePets) and isSelected(rarity, autoFarm.TakeRarities) then
-					local cps = readPetCashPerSecond(petModel) or 0
-					if cps >= autoFarm.TakeMinCash and (not worstCps or cps > worstCps) then
+				local cps = readPetCashPerSecond(petModel) or 0
+				if not (isSelected(name, autoFarm.TakePets) and isSelected(rarity, autoFarm.TakeRarities)) then
+					petScan.filtered += 1
+				elseif cps < autoFarm.TakeMinCash then
+					petScan.lowCash += 1
+				elseif worstCps and cps <= worstCps then
+					petScan.notBetter += 1
+				else
+					do
 						local dist = flatDelta(rootPart.Position, petRoot.Position).Magnitude
 						local despawnAt = tonumber(petModel:GetAttribute("DespawnAtServerTime"))
 						-- Leave pets that will despawn before we can reach them and hold E
 						local tooLate = okNow and despawnAt and (despawnAt - serverNow) < (dist / math.max(walkSpeed, 16) + 3)
 						local petZone = petModel:GetAttribute("ZoneId") and tostring(petModel:GetAttribute("ZoneId")) or nil
 						local guarded = #threats > 0 and findGuardThreat(threats, petRoot.Position, petZone)
-						if not tooLate and not guarded then
-							if not best or cps > best.cps or (cps == best.cps and dist < best.dist) then
-								best = { model = petModel, root = petRoot, name = name, rarity = rarity, cps = cps, dist = dist, zone = petZone }
-							end
+						if tooLate then
+							petScan.tooLate += 1
+						elseif guarded then
+							petScan.guarded += 1
+						elseif not best or cps > best.cps or (cps == best.cps and dist < best.dist) then
+							best = { model = petModel, root = petRoot, name = name, rarity = rarity, cps = cps, dist = dist, zone = petZone }
 						end
 					end
 				end
@@ -3099,11 +3116,27 @@ do
 					local worstStr = worstCps
 						and string.format("$%s/s (%s)", formatAbbreviatedNumber(worstCps), tostring(worstName))
 						or "unreadable"
+					local whyStr
+					if petScan.worstUnreadable then
+						whyStr = "Taking nothing: can't read plot pet Cash/s (turn off 'Only If Better Than My Worst Plot Pet')"
+					else
+						whyStr = string.format(
+							"On ground: %d · Filtered out: %d · Low Cash/s: %d · Not better: %d · Guarded: %d · Despawning: %d · Skipped: %d",
+							petScan.total,
+							petScan.filtered,
+							petScan.lowCash,
+							petScan.notBetter,
+							petScan.guarded,
+							petScan.tooLate,
+							petScan.skipped
+						)
+					end
 					autoFarm.TakeStatsLabel:SetText(string.format(
-						"Pets Taken: %d · Failed: %d · Worst plot pet: %s",
+						"Pets Taken: %d · Failed: %d · Worst plot pet: %s\n%s",
 						autoFarm.PetsTaken,
 						autoFarm.TakeFailed,
-						worstStr
+						worstStr,
+						whyStr
 					))
 				else
 					autoFarm.TakeStatsLabel:SetText("Auto-Take: Off")
