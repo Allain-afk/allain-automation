@@ -19,8 +19,8 @@ local GAMES = {
 	{
 		name = "Steal a Balut",
 		file = "games/steal-a-balut.lua",
-		gameIds = {},
-		placeIds = {},
+		gameIds = { 10771643321 },
+		placeIds = { 90773083590844 },
 		nameMatches = { "steal a balut" },
 	},
 }
