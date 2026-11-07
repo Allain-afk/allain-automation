@@ -5,7 +5,7 @@ Keyless automation scripts for Roblox. One loadstring works for every supported 
 | Game | Version |
 | --- | --- |
 | Break and Steal an Egg | v3.2 |
-| Steal a Balut | v0.1 (in progress) |
+| Steal a Balut | v0.2 (beta) |
 
 ## How to run
 
@@ -54,7 +54,34 @@ Change any keybind in the menu. Your settings are saved automatically.
 
 ## Steal a Balut
 
-Work in progress. Anti-AFK and saved settings are available now; automation features are coming. The **Data Scan** tab can send the game's structure and a live capture of your actions to a Discord webhook as a .txt file.
+### Features
+
+**Automation**
+- **Egg Auto-Farm**: runs to baluts and breaks them with the in-game Auto Swing (or by clicking with your Asarol). Filter by zone, rarity and max HP; pick the closest, lowest HP or highest rarity egg first.
+- **Auto-Steal Pets**: runs to wild pets, holds E on them and walks them home to your base. Filter by rarity and minimum income; pets that would despawn before you get there are skipped.
+- **Always Take Pets I Hatch**: takes the pet from every egg the farm breaks, even with only Egg Auto-Farm on.
+- **Auto Equip Best** after each pet reaches your base.
+- **Guard avoidance**: skips eggs and pets near guards and backs off when a guard is alerted or chasing.
+- Gets off the Trisikad before walking.
+
+All movement uses your character's normal in-game speed. The script never changes WalkSpeed and never teleports.
+
+**Visuals**
+- Egg ESP (rarity, HP, zone) and wild pet ESP (rarity, income, mutation, time left), with a rarity filter.
+
+**Alerts & Scan**
+- Rare wild pet alerts (in-game and Discord), and an optional Discord message for each stored pet.
+- Game Data Scan: sends the game's structure and a live capture of your actions to a Discord webhook as a .txt file.
+
+### Default keybinds
+
+| Key | Toggles |
+| --- | --- |
+| RightShift | Menu |
+| H | Egg Auto-Farm |
+| J | Auto-Steal |
+| G | Egg ESP |
+| P | Wild Pet ESP |
 
 ## Executor requirements
 

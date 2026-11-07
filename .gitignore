@@ -1,3 +1,6 @@
 tests/
 .claude/worktrees/*
 roblox.yml
+
+# Local game data scans (webhook dumps)
+scans/
