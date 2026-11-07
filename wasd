@@ -194,6 +194,16 @@ local autoFarm = {
 	EggsBroken = 0,
 	Target = nil,
 	MoveDir = nil,
+	AvoidGuards = true,
+	GuardDistance = 35,
+	WebhookSummary = false,
+	SummaryInterval = 30,
+	EggsSkipped = 0,
+	GuardsAvoided = 0,
+	BestLuck = 0,
+	BestLuckName = nil,
+	ActiveSeconds = 0,
+	EnabledAt = nil,
 }
 
 local anchorPosition = nil
@@ -208,7 +218,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "Break and Steal an Egg Keyless - by Allain",
 	Footer = "Allain-afk · Break and Steal an Egg",
-	FooterRight = "v3.1",
+	FooterRight = "v3.1 beta",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(870, 690),
@@ -594,6 +604,49 @@ do
 
 	autoFarm.Box:AddDivider()
 
+	autoFarm.Box:AddCheckbox("AutoFarmAvoidGuards", {
+		Text = "Avoid Guards",
+		Default = autoFarm.AvoidGuards,
+		Tooltip = "Skips eggs near guards and retreats when a chasing guard gets close",
+	})
+
+	autoFarm.Box:AddSlider("AutoFarmGuardDistance", {
+		Text = "Guard Safe Distance",
+		Default = autoFarm.GuardDistance,
+		Min = 15,
+		Max = 80,
+		Rounding = 0,
+		Suffix = " studs",
+		Tooltip = "Chasing guards within this distance trigger avoidance (roaming guards: half this distance)",
+	})
+
+	autoFarm.Box:AddDivider()
+
+	autoFarm.Box:AddCheckbox("AutoFarmWebhookSummary", {
+		Text = "Send Farm Summaries to Webhook",
+		Default = autoFarm.WebhookSummary,
+		Tooltip = "Periodically posts eggs broken, eggs/hour, cash gained and best egg to your Discord webhook",
+	})
+
+	autoFarm.Box:AddSlider("AutoFarmSummaryInterval", {
+		Text = "Summary Interval",
+		Default = autoFarm.SummaryInterval,
+		Min = 5,
+		Max = 120,
+		Rounding = 0,
+		Suffix = " min",
+		Tooltip = "How often a farm summary is sent while Zone Auto-Farm is running",
+	})
+
+	autoFarm.Box:AddButton("Send Farm Summary Now", function()
+		if autoFarm.SendSummary then
+			local ok, err = autoFarm.SendSummary()
+			Library:Notify(ok and "Farm summary sent to Discord!" or ("Webhook failed: " .. tostring(err)), 3)
+		end
+	end)
+
+	autoFarm.Box:AddDivider()
+
 	autoFarm.Box:AddButton("Scan Speed & Zone Data to Webhook", function()
 		if scanSpeedAndZoneData then
 			scanSpeedAndZoneData()
@@ -652,7 +705,7 @@ do
 	})
 
 	autoFarm.StatsLabel = AutoStatusBox:AddLabel("AutoFarmStatsLabel", {
-		Text = "Eggs Broken: 0",
+		Text = "Eggs Broken: 0 · Skipped: 0 · Guards Avoided: 0",
 		DoesWrap = true,
 	})
 
@@ -1613,6 +1666,153 @@ WebhookBox:AddButton("Scan Speed & Zone Data to Webhook", function()
 	end
 end)
 
+--// Temporary diagnostic: how hatched pets are picked up and how plot pets expose Cash/s \\--
+WebhookBox:AddButton("Scan Pet Pickup & Plot Data to Webhook", function()
+	task.spawn(function()
+		if not webhookUrl or webhookUrl == "" then
+			Library:Notify("Please enter a Webhook URL in AFK & Alerts tab first!", 4)
+			return
+		end
+		Library:Notify("Scanning pet pickup & plot data... Sending to Webhook!", 3)
+
+		local function attrString(inst)
+			local parts = {}
+			for k, v in pairs(inst:GetAttributes()) do
+				table.insert(parts, string.format("%s=%s", tostring(k), tostring(v)))
+			end
+			table.sort(parts)
+			return "{" .. table.concat(parts, ", ") .. "}"
+		end
+
+		local function describeInteractables(root, lines, indent)
+			local found = 0
+			for _, d in ipairs(root:GetDescendants()) do
+				if d:IsA("ProximityPrompt") then
+					found += 1
+					table.insert(lines, string.format(
+						"%sPrompt %s: Action=%q Object=%q Hold=%.2f Dist=%s Enabled=%s LoS=%s %s",
+						indent, d:GetFullName():sub(-60), d.ActionText, d.ObjectText, d.HoldDuration,
+						tostring(d.MaxActivationDistance), tostring(d.Enabled), tostring(d.RequiresLineOfSight), attrString(d)
+					))
+				elseif d:IsA("ClickDetector") then
+					found += 1
+					table.insert(lines, string.format("%sClickDetector %s Dist=%s", indent, d:GetFullName():sub(-60), tostring(d.MaxActivationDistance)))
+				elseif d:IsA("TouchTransmitter") then
+					found += 1
+					table.insert(lines, string.format("%sTouch on %s", indent, d.Parent and d.Parent:GetFullName():sub(-60) or "?"))
+				elseif d:IsA("LuaSourceContainer") or d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
+					found += 1
+					table.insert(lines, string.format("%s%s %s", indent, d.ClassName, d:GetFullName():sub(-60)))
+				end
+			end
+			if found == 0 then
+				table.insert(lines, indent .. "No prompts / click detectors / touch / scripts found")
+			end
+		end
+
+		local function postPart(title, lines, color)
+			local dump = table.concat(lines, "\n")
+			if #dump > 3800 then dump = dump:sub(1, 3800) .. "\n... (truncated)" end
+			postDiscordEmbed({ title = title, description = "```text\n" .. dump .. "\n```", color = color })
+		end
+
+		-- Part 1: Hatched pets on the ground
+		local p1 = { "-- Part 1: workspace.AnimalPickups --" }
+		local pickups = workspace:FindFirstChild("AnimalPickups")
+		if pickups then
+			local pets = pickups:GetChildren()
+			table.insert(p1, string.format("AnimalPickups: %d children, Attrs %s", #pets, attrString(pickups)))
+			for i = 1, math.min(3, #pets) do
+				local pet = pets[i]
+				local childNames = {}
+				for _, c in ipairs(pet:GetChildren()) do
+					table.insert(childNames, c.Name .. "(" .. c.ClassName .. ")")
+				end
+				table.insert(p1, string.format("[%d] %s (%s) Attrs %s", i, pet.Name, pet.ClassName, attrString(pet)))
+				table.insert(p1, "    Children: " .. table.concat(childNames, ", "):sub(1, 300))
+				describeInteractables(pet, p1, "    ")
+			end
+		else
+			table.insert(p1, "workspace.AnimalPickups: NOT FOUND")
+		end
+		local carryAttrs = {}
+		for k, v in pairs(player:GetAttributes()) do
+			local kl = tostring(k):lower()
+			if kl:find("carry") or kl:find("hold") or kl:find("animal") or kl:find("pet") or kl:find("steal") then
+				table.insert(carryAttrs, string.format("%s=%s", tostring(k), tostring(v)))
+			end
+		end
+		table.insert(p1, "Player carry/pet attrs: {" .. table.concat(carryAttrs, ", ") .. "}")
+		local character = player.Character
+		if character then
+			table.insert(p1, "Character Attrs " .. attrString(character))
+		end
+		postPart("Pet Pickup Diagnostics (Part 1/3: Ground Pets)", p1, 0x5865F2)
+		task.wait(1.5)
+
+		-- Part 2: My plot and its placed pets
+		local p2 = { "-- Part 2: My Plot --" }
+		local myPlot = nil
+		local plotsFolder = workspace:FindFirstChild("Plots")
+		if plotsFolder then
+			for _, plot in ipairs(plotsFolder:GetChildren()) do
+				if plot:GetAttribute("OwnerUserId") == player.UserId then
+					myPlot = plot
+					break
+				end
+			end
+		end
+		if myPlot then
+			table.insert(p2, string.format("Plot %s Attrs %s", myPlot:GetFullName(), attrString(myPlot)))
+			local childNames = {}
+			for _, c in ipairs(myPlot:GetChildren()) do
+				table.insert(childNames, string.format("%s(%s,%d)", c.Name, c.ClassName, #c:GetChildren()))
+			end
+			table.insert(p2, "Children: " .. table.concat(childNames, ", "):sub(1, 900))
+			local shown = 0
+			for _, d in ipairs(myPlot:GetDescendants()) do
+				if shown >= 4 then break end
+				local petRoot = d:IsA("Model") and d:FindFirstChild("RootPart")
+				if d:GetAttribute("AnimalName") ~= nil or (petRoot and petRoot:FindFirstChild("AnimalOverheadAttachment")) then
+					shown += 1
+					local overheadCps = ""
+					local att = d:FindFirstChild("AnimalOverheadAttachment", true)
+					local cpsFrame = att and att:FindFirstChild("CashPerSecond", true)
+					local cpsLabel = cpsFrame and (cpsFrame:IsA("TextLabel") and cpsFrame or cpsFrame:FindFirstChildWhichIsA("TextLabel"))
+					if cpsLabel then overheadCps = cpsLabel.Text end
+					table.insert(p2, string.format("Pet %s (%s) Attrs %s Overhead=%q", d:GetFullName():sub(-70), d.ClassName, attrString(d), overheadCps))
+				end
+			end
+			if shown == 0 then
+				table.insert(p2, "No placed pet models found (no AnimalName attr / AnimalOverheadAttachment)")
+			end
+		else
+			table.insert(p2, "Owned plot: NOT FOUND in workspace.Plots")
+		end
+		postPart("Pet Pickup Diagnostics (Part 2/3: My Plot)", p2, 0x57F287)
+		task.wait(1.5)
+
+		-- Part 3: Remotes that look pet / pickup related
+		local p3 = { "-- Part 3: Pet-related Remotes --" }
+		local count = 0
+		for _, d in ipairs(cloneref(game:GetService("ReplicatedStorage")):GetDescendants()) do
+			if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") or d:IsA("UnreliableRemoteEvent") then
+				local n = d:GetFullName():lower()
+				if n:find("pick") or n:find("animal") or n:find("pet") or n:find("steal") or n:find("carry") or n:find("grab") or n:find("collect") or n:find("place") or n:find("claim") or n:find("hatch") then
+					count += 1
+					if count <= 60 then
+						table.insert(p3, string.format("%s (%s)", d:GetFullName(), d.ClassName))
+					end
+				end
+			end
+		end
+		table.insert(p3, string.format("Total matching remotes: %d", count))
+		postPart("Pet Pickup Diagnostics (Part 3/3: Remotes)", p3, 0xFEE75C)
+
+		Library:Notify("3-Part Pet Pickup & Plot scan sent to Webhook!", 4)
+	end)
+end)
+
 --============================================================================--
 --// Safe Auto-Progression Engine (Pet, Pickaxe, Trail, Plot, Treadmill)
 --============================================================================--
@@ -2526,19 +2726,70 @@ do
 		end
 	end
 
-	local function addCandidate(candidates, eggPart, zoneName, myRootPos)
+	--// Guard Avoidance \\--
+	local cachedThreats, cachedThreatsAt = {}, 0
+	local lastGuardedCount = 0
+
+	local function getGuardThreats()
+		if not autoFarm.AvoidGuards or not autoFarm.CollectGuards then
+			return {}
+		end
+		if os.clock() - cachedThreatsAt < 0.2 then
+			return cachedThreats
+		end
+
+		local threats = {}
+		local ok, guards = pcall(autoFarm.CollectGuards)
+		if ok and guards then
+			for _, guardModel in ipairs(guards) do
+				local guardRoot = guardModel:FindFirstChild("Main")
+					or guardModel:FindFirstChild("HumanoidRootPart")
+					or guardModel:FindFirstChild("BodyHitbox")
+					or guardModel.PrimaryPart
+					or guardModel:FindFirstChildWhichIsA("BasePart")
+				if guardRoot and guardRoot:IsA("BasePart") then
+					local chaseState = tostring(guardModel:GetAttribute("ChaseState") or "Roaming"):lower()
+					table.insert(threats, {
+						pos = guardRoot.Position,
+						chasing = chaseState ~= "roaming" and chaseState ~= "idle",
+					})
+				end
+			end
+		end
+
+		cachedThreats, cachedThreatsAt = threats, os.clock()
+		return threats
+	end
+
+	-- Closest guard threatening pos: chasing guards count within the full safe distance, roaming guards within half
+	local function findGuardThreat(threats, pos)
+		local closest, closestDist = nil, math.huge
+		for _, threat in ipairs(threats) do
+			local d = Vector3.new(threat.pos.X - pos.X, 0, threat.pos.Z - pos.Z).Magnitude
+			local limit = threat.chasing and autoFarm.GuardDistance or autoFarm.GuardDistance * 0.5
+			if d <= limit and d < closestDist then
+				closest, closestDist = threat, d
+			end
+		end
+		return closest
+	end
+
+	local function addCandidate(candidates, eggPart, zoneName, myRootPos, threats)
 		if not eggPart or not eggPart:IsA("BasePart") or eggPart.Name:lower():find("nest") then
-			return
+			return false
 		end
 		if not isEggAlive(eggPart) then
-			return
+			return false
 		end
 		local skipUntil = skippedEggs[eggPart]
 		if skipUntil then
 			if os.clock() < skipUntil then
-				return
+				return false
 			end
 			skippedEggs[eggPart] = nil
+		end
+		if #threats > 0 and findGuardThreat(threats, eggPart.Position) then
+			return true
 		end
 
 		local cleanName = getCleanEggName(eggPart)
@@ -2552,11 +2803,11 @@ do
 		end
 
 		if not isEggTypeMatching(cleanName, autoFarm.EggsSelected) then
-			return
+			return false
 		end
 		local luckVal = getEggLuckValue(eggPart)
 		if autoFarm.MinLuck > 0 and luckVal < autoFarm.MinLuck then
-			return
+			return false
 		end
 		table.insert(candidates, {
 			part = eggPart,
@@ -2566,6 +2817,7 @@ do
 			hp = tonumber(eggPart:GetAttribute("Health")) or 999999,
 			dist = (eggPart.Position - myRootPos).Magnitude,
 		})
+		return false
 	end
 
 	local function findBestCandidateEgg(rootPart)
@@ -2573,6 +2825,8 @@ do
 		local build = workspace:FindFirstChild("Build")
 		local zoneBuilds = build and build:FindFirstChild("ZoneBuilds")
 		local myRootPos = rootPart.Position
+		local threats = getGuardThreats()
+		local guardedCount = 0
 
 		if zoneBuilds then
 			for _, zoneFolder in ipairs(zoneBuilds:GetChildren()) do
@@ -2586,7 +2840,9 @@ do
 							if not eggPart and eggContainer:IsA("BasePart") then
 								eggPart = eggContainer
 							end
-							addCandidate(candidates, eggPart, zoneName, myRootPos)
+							if addCandidate(candidates, eggPart, zoneName, myRootPos, threats) then
+								guardedCount += 1
+							end
 						end
 					end
 				end
@@ -2597,10 +2853,13 @@ do
 		if topEggs and (autoFarm.Zone == "All Zones" or autoFarm.Zone == "") then
 			for _, child in ipairs(topEggs:GetChildren()) do
 				local eggPart = child:IsA("BasePart") and child or child:FindFirstChild("Egg")
-				addCandidate(candidates, eggPart, "Workspace", myRootPos)
+				if addCandidate(candidates, eggPart, "Workspace", myRootPos, threats) then
+					guardedCount += 1
+				end
 			end
 		end
 
+		lastGuardedCount = guardedCount
 		if #candidates == 0 then
 			return nil
 		end
@@ -2682,6 +2941,113 @@ do
 		return Vector3.new(toPos.X - fromPos.X, 0, toPos.Z - fromPos.Z)
 	end
 
+	autoFarm.GetActiveSeconds = function()
+		local active = autoFarm.ActiveSeconds
+		if autoFarm.EnabledAt then
+			active += os.clock() - autoFarm.EnabledAt
+		end
+		return active
+	end
+
+	local function getEggsPerHour()
+		local hours = autoFarm.GetActiveSeconds() / 3600
+		return hours > 0.01 and autoFarm.EggsBroken / hours or 0
+	end
+
+	local function updateFarmStats()
+		if autoFarm.StatsLabel then
+			autoFarm.StatsLabel:SetText(string.format(
+				"Eggs Broken: %d (%d/hr) · Skipped: %d · Guards Avoided: %d",
+				autoFarm.EggsBroken,
+				math.floor(getEggsPerHour() + 0.5),
+				autoFarm.EggsSkipped,
+				autoFarm.GuardsAvoided
+			))
+		end
+	end
+
+	-- Run directly away from a guard until we are well outside the safe distance (max 1.5s)
+	local function retreatFromGuard(humanoid, rootPart, guardPos)
+		local retreatUntil = os.clock() + 1.5
+		while autoFarm.Enabled and not Library.Unloaded and humanoid.Health > 0 and os.clock() < retreatUntil do
+			local away = flatDelta(guardPos, rootPart.Position)
+			if away.Magnitude >= autoFarm.GuardDistance * 1.3 then
+				break
+			end
+			autoFarm.MoveDir = away.Magnitude > 0.1 and away.Unit or -rootPart.CFrame.LookVector
+			RunService.Heartbeat:Wait()
+		end
+		autoFarm.StopMoving()
+	end
+
+	--// Farm Webhook Summaries \\--
+	local function readCash()
+		local rawCash = player:GetAttribute("Cash")
+		return typeof(rawCash) == "number" and rawCash or parseAbbreviatedNumber(rawCash)
+	end
+
+	local function resetSummaryBaseline()
+		autoFarm.LastSummaryAt = os.clock()
+		autoFarm.LastSummaryBroken = autoFarm.EggsBroken
+		autoFarm.LastSummaryCash = readCash()
+	end
+
+	autoFarm.SendSummary = function()
+		if not autoFarm.LastSummaryAt then
+			resetSummaryBaseline()
+		end
+
+		local cashNow = readCash()
+		local cashStr = cashNow and ("$" .. formatAbbreviatedNumber(cashNow)) or "N/A"
+		if cashNow and autoFarm.LastSummaryCash then
+			cashStr ..= string.format("\n+$%s since last summary", formatAbbreviatedNumber(math.max(0, cashNow - autoFarm.LastSummaryCash)))
+		end
+
+		local bestStr = autoFarm.BestLuckName
+			and string.format("%s (x%.1f luck)", autoFarm.BestLuckName, autoFarm.BestLuck)
+			or "None yet"
+
+		local ok, err = postDiscordEmbed({
+			title = "Zone Auto-Farm Summary for " .. tostring(player.Name),
+			description = string.format(
+				"Farming for %s · Zone: %s",
+				formatShortDuration(autoFarm.GetActiveSeconds()),
+				tostring(autoFarm.Zone)
+			),
+			color = 0x57F287,
+			fields = {
+				{ name = "Eggs Broken", value = string.format("%d total\n+%d since last summary", autoFarm.EggsBroken, autoFarm.EggsBroken - (autoFarm.LastSummaryBroken or 0)), inline = true },
+				{ name = "Rate", value = string.format("%d eggs/hr", math.floor(getEggsPerHour() + 0.5)), inline = true },
+				{ name = "Cash", value = cashStr, inline = true },
+				{ name = "Best Egg Broken", value = bestStr, inline = true },
+				{ name = "Skipped", value = tostring(autoFarm.EggsSkipped) .. " unreachable/stuck", inline = true },
+				{ name = "Guards Avoided", value = tostring(autoFarm.GuardsAvoided), inline = true },
+			},
+		})
+
+		if ok then
+			resetSummaryBaseline()
+		end
+		return ok, err
+	end
+
+	task.spawn(function()
+		while not Library.Unloaded do
+			if autoFarm.Enabled and autoFarm.WebhookSummary and webhookUrl ~= "" then
+				if not autoFarm.LastSummaryAt then
+					resetSummaryBaseline()
+				elseif os.clock() - autoFarm.LastSummaryAt >= autoFarm.SummaryInterval * 60 then
+					local ok = autoFarm.SendSummary()
+					if not ok then
+						-- Retry in a minute instead of every tick when the webhook is failing
+						autoFarm.LastSummaryAt = os.clock() - autoFarm.SummaryInterval * 60 + 60
+					end
+				end
+			end
+			task.wait(5)
+		end
+	end)
+
 	--// Main Zone Auto-Farm Loop \\--
 	task.spawn(function()
 		local lastAfkPulse = 0
@@ -2722,8 +3088,13 @@ do
 			if not egg then
 				autoFarm.Target = nil
 				autoFarm.StopMoving()
-				setFarmTarget("Target: None found in selected zone")
-				setFarmState("Waiting for egg spawns...")
+				if lastGuardedCount > 0 then
+					setFarmTarget(string.format("Target: %d egg(s) guarded, waiting...", lastGuardedCount))
+					setFarmState("Waiting for guards to leave...")
+				else
+					setFarmTarget("Target: None found in selected zone")
+					setFarmState("Waiting for egg spawns...")
+				end
 				task.wait(0.5)
 				continue
 			end
@@ -2743,11 +3114,17 @@ do
 			local stuckJumps = 0
 			local lastLabelUpdate = 0
 			local gaveUp = false
+			local guardThreat = nil
 
 			while autoFarm.Enabled and not Library.Unloaded and humanoid.Health > 0 and rootPart.Parent and isEggAlive(egg) do
 				local delta = flatDelta(rootPart.Position, egg.Position)
 				local dist = delta.Magnitude
 				if dist <= reach then
+					break
+				end
+
+				guardThreat = findGuardThreat(getGuardThreats(), rootPart.Position)
+				if guardThreat then
 					break
 				end
 
@@ -2781,6 +3158,8 @@ do
 
 			if gaveUp then
 				skippedEggs[egg] = os.clock() + 20
+				autoFarm.EggsSkipped += 1
+				updateFarmStats()
 				setFarmTarget("Target: Unreachable, skipping...")
 				task.wait(0.1)
 				continue
@@ -2804,6 +3183,11 @@ do
 						break
 					end
 
+					guardThreat = findGuardThreat(getGuardThreats(), rootPart.Position)
+					if guardThreat then
+						break
+					end
+
 					local hpNow = tonumber(egg:GetAttribute("Health"))
 					if hpNow ~= lastHp then
 						lastHp = hpNow
@@ -2820,18 +3204,33 @@ do
 					-- Give up on eggs that take no damage for a long time (e.g. guarded or not breakable)
 					if (os.clock() - lastHpChange) > 20 then
 						skippedEggs[egg] = os.clock() + 20
+						autoFarm.EggsSkipped += 1
+						updateFarmStats()
 						break
 					end
 					task.wait(0.08)
 				end
 			end
 
-			-- 6. Egg broken!
+			-- 6. A guard got close while running or breaking: back off and leave this egg for a while
+			if guardThreat and not brokeInRange then
+				skippedEggs[egg] = os.clock() + 15
+				autoFarm.GuardsAvoided += 1
+				updateFarmStats()
+				setFarmTarget("Target: Guard nearby, retreating...")
+				setFarmState("Avoiding guard!")
+				retreatFromGuard(humanoid, rootPart, guardThreat.pos)
+				continue
+			end
+
+			-- 7. Egg broken!
 			if brokeInRange then
 				autoFarm.EggsBroken += 1
-				if autoFarm.StatsLabel then
-					autoFarm.StatsLabel:SetText("Eggs Broken: " .. tostring(autoFarm.EggsBroken))
+				if luck > autoFarm.BestLuck or not autoFarm.BestLuckName then
+					autoFarm.BestLuck = luck
+					autoFarm.BestLuckName = eggName
 				end
+				updateFarmStats()
 				setFarmTarget("Target: Egg broken! Finding next...")
 				task.wait(0.1)
 			end
@@ -3763,6 +4162,7 @@ local function collectAllGuardModels()
 	end
 	return guards
 end
+autoFarm.CollectGuards = collectAllGuardModels
 
 updateAllGuardEsp = function()
 	if (not guardEspEnabled and not guardWarnEnabled) or Library.Unloaded then
@@ -4429,7 +4829,13 @@ end)
 
 Toggles.AutoFarmEnabled:OnChanged(function(Value)
 	autoFarm.Enabled = Value
-	if not Value then
+	if Value then
+		autoFarm.EnabledAt = autoFarm.EnabledAt or os.clock()
+	else
+		if autoFarm.EnabledAt then
+			autoFarm.ActiveSeconds += os.clock() - autoFarm.EnabledAt
+			autoFarm.EnabledAt = nil
+		end
 		autoFarm.Target = nil
 		if autoFarm.StopMoving then
 			autoFarm.StopMoving()
@@ -4472,6 +4878,26 @@ end)
 
 Options.AutoFarmReach:OnChanged(function(Value)
 	autoFarm.Reach = tonumber(Value) or 7
+	autoSaveActiveConfig()
+end)
+
+Toggles.AutoFarmAvoidGuards:OnChanged(function(Value)
+	autoFarm.AvoidGuards = Value
+	autoSaveActiveConfig()
+end)
+
+Options.AutoFarmGuardDistance:OnChanged(function(Value)
+	autoFarm.GuardDistance = tonumber(Value) or 35
+	autoSaveActiveConfig()
+end)
+
+Toggles.AutoFarmWebhookSummary:OnChanged(function(Value)
+	autoFarm.WebhookSummary = Value
+	autoSaveActiveConfig()
+end)
+
+Options.AutoFarmSummaryInterval:OnChanged(function(Value)
+	autoFarm.SummaryInterval = tonumber(Value) or 30
 	autoSaveActiveConfig()
 end)
 
