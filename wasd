@@ -260,7 +260,7 @@ local AutoProgressBox
 local AutoPetStatusLabel, AutoPickaxeStatusLabel, AutoTrailStatusLabel, AutoPlotStatusLabel, AutoTreadmillStatusLabel, AutoSwingStatusLabel
 local TopPet1Label, TopPet2Label, TopPet3Label
 local RareMinCashStatusLabel
-local WebhookBox, scanSpeedAndZoneData
+local WebhookBox
 
 do
 	--// Tab 1: Anti-AFK (Controls, Visualizer, Session Dashboard)
@@ -616,7 +616,7 @@ do
 	autoFarm.Box:AddCheckbox("AutoFarmAvoidGuards", {
 		Text = "Avoid Guards",
 		Default = autoFarm.AvoidGuards,
-		Tooltip = "Skips eggs near guards and retreats when a chasing guard gets close",
+		Tooltip = "Only guards from the target's zone count: skips eggs/pets near them and retreats when one gets close",
 	})
 
 	autoFarm.Box:AddSlider("AutoFarmGuardDistance", {
@@ -651,16 +651,6 @@ do
 		if autoFarm.SendSummary then
 			local ok, err = autoFarm.SendSummary()
 			Library:Notify(ok and "Farm summary sent to Discord!" or ("Webhook failed: " .. tostring(err)), 3)
-		end
-	end)
-
-	autoFarm.Box:AddDivider()
-
-	autoFarm.Box:AddButton("Scan Speed & Zone Data to Webhook", function()
-		if scanSpeedAndZoneData then
-			scanSpeedAndZoneData()
-		else
-			Library:Notify("Diagnostic function loading...", 2)
 		end
 	end)
 
@@ -1493,389 +1483,12 @@ local function sendEventWebhook(title, description, colorHex)
 end
 
 WebhookBox:AddButton("Send Test Progress Webhook", function()
-	local stats = collectProgressSnapshot(false)
 	local ok, err = sendProgressWebhook(nil, 0x5865F2, false)
-	if stats.pets == "N/A" then
-		-- Send a focused Pet Path Finder dump so we can see where the 52/250 label lives
-		local petLines = {}
-		local playerGui = player:FindFirstChild("PlayerGui")
-		if playerGui then
-			for _, desc in ipairs(playerGui:GetDescendants()) do
-				if desc:IsA("TextLabel") or desc:IsA("TextButton") then
-					local t = (desc.Text or ""):gsub("%s+", " ")
-					local p = desc:GetFullName():gsub("^Players%.[^%.]+%.PlayerGui%.", "")
-					if t:find("/") or t:lower():find("pet") or p:lower():find("pet") or p:lower():find("inv") then
-						if not p:find("^RobloxGui") and #t < 60 then
-							table.insert(petLines, string.format("[GUI] %s = %q", p, t))
-						end
-					end
-				end
-			end
-		end
-		local backpack = player:FindFirstChild("Backpack")
-		if backpack then
-			table.insert(petLines, string.format("[Backpack] Children count = %d", #backpack:GetChildren()))
-		end
-		local dump = table.concat(petLines, "\n")
-		if #dump > 3800 then
-			dump = dump:sub(1, 3800) .. "\n... (truncated)"
-		end
-		if dump ~= "" then
-			pcall(function()
-				postDiscordEmbed({
-					title = "Pet Path Finder (v1.8)",
-					description = "```text\n" .. dump .. "\n```",
-					color = 0xFEE75C,
-				})
-			end)
-		end
-	end
 	if ok then
 		Library:Notify("Progress report sent to Discord!", 3)
 	else
 		Library:Notify("Webhook failed: " .. tostring(err), 4)
 	end
-end)
-
-scanSpeedAndZoneData = function()
-	task.spawn(function()
-		if not webhookUrl or webhookUrl == "" then
-			Library:Notify("Please enter a Webhook URL in AFK & Alerts tab first!", 4)
-			return
-		end
-
-		Library:Notify("Starting Speed & Zone scan... Sending to Webhook!", 3)
-
-		-- Part 1: Player Movement, Speed & Character Mechanics
-		local p1Lines = {}
-		table.insert(p1Lines, "-- Part 1: Player Movement, Speed & Character Mechanics --")
-		local character = player.Character
-		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-		local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-
-		if humanoid then
-			table.insert(p1Lines, string.format("Humanoid: WalkSpeed = %s, JumpPower = %s, Health = %s/%s", tostring(humanoid.WalkSpeed), tostring(humanoid.JumpPower), tostring(humanoid.Health), tostring(humanoid.MaxHealth)))
-			table.insert(p1Lines, string.format("Humanoid: MoveDirection = %s, FloorMaterial = %s", tostring(humanoid.MoveDirection), tostring(humanoid.FloorMaterial)))
-		else
-			table.insert(p1Lines, "Humanoid: NOT FOUND")
-		end
-
-		if rootPart then
-			local vel = rootPart.AssemblyLinearVelocity or rootPart.Velocity
-			table.insert(p1Lines, string.format("HRP: Velocity = %s, Magnitude = %.2f", tostring(vel), vel and vel.Magnitude or 0))
-		end
-
-		if character then
-			local charAttrs = character:GetAttributes()
-			local charAttrStrs = {}
-			for k, v in pairs(charAttrs) do
-				table.insert(charAttrStrs, string.format("%s=%s", tostring(k), tostring(v)))
-			end
-			table.insert(p1Lines, string.format("Character Attrs (%d): {%s}", #charAttrStrs, table.concat(charAttrStrs, ", ")))
-
-			local charMovers = {}
-			for _, ch in ipairs(character:GetChildren()) do
-				if ch:IsA("BodyMover") or ch:IsA("Constraint") or ch:IsA("BodyVelocity") or ch:IsA("LinearVelocity") or ch:IsA("VectorForce") or ch:IsA("AlignPosition") or ch.Name:lower():find("speed") or ch.Name:lower():find("move") then
-					table.insert(charMovers, string.format("%s (%s)", ch.Name, ch.ClassName))
-				end
-			end
-			if #charMovers > 0 then
-				table.insert(p1Lines, string.format("Character Movement Movers: [%s]", table.concat(charMovers, ", ")))
-			else
-				table.insert(p1Lines, "Character Movement Movers: None found")
-			end
-
-			local heldTool = character:FindFirstChildOfClass("Tool")
-			table.insert(p1Lines, string.format("Currently Held Tool: %s", heldTool and heldTool.Name or "None"))
-		end
-
-		-- Player attributes related to speed
-		local playerAttrs = player:GetAttributes()
-		local speedAttrStrs = {}
-		for k, v in pairs(playerAttrs) do
-			local kLower = tostring(k):lower()
-			if kLower:find("speed") or kLower:find("mount") or kLower:find("ride") or kLower:find("boost") or kLower:find("power") or kLower:find("walk") or kLower:find("sprint") then
-				table.insert(speedAttrStrs, string.format("%s=%s", tostring(k), tostring(v)))
-			end
-		end
-		table.insert(p1Lines, string.format("Player Speed-Related Attrs (%d): {%s}", #speedAttrStrs, table.concat(speedAttrStrs, ", ")))
-
-		local ls = player:FindFirstChild("leaderstats")
-		if ls then
-			local lsParts = {}
-			for _, item in ipairs(ls:GetChildren()) do
-				table.insert(lsParts, string.format("%s=%s", item.Name, tostring(item.Value)))
-			end
-			table.insert(p1Lines, string.format("Leaderstats: {%s}", table.concat(lsParts, ", ")))
-		end
-
-		local pScripts = player:FindFirstChild("PlayerScripts")
-		if pScripts then
-			local scrNames = {}
-			for _, s in ipairs(pScripts:GetChildren()) do
-				table.insert(scrNames, string.format("%s (%s)", s.Name, s.ClassName))
-			end
-			table.insert(p1Lines, string.format("PlayerScripts (%d): [%s]", #scrNames, table.concat(scrNames, ", ")))
-		end
-
-		local rideMounts = workspace:FindFirstChild("RideMounts")
-		if rideMounts then
-			table.insert(p1Lines, string.format("workspace.RideMounts (%d children):", #rideMounts:GetChildren()))
-			for _, m in ipairs(rideMounts:GetChildren()) do
-				if m:GetAttribute("OwnerUserId") == player.UserId or m.Name:find(tostring(player.UserId)) or m.Name:find(player.Name) then
-					table.insert(p1Lines, string.format("  -> Your Mount: %s (Class: %s)", m.Name, m.ClassName))
-				end
-			end
-		end
-
-		local dump1 = table.concat(p1Lines, "\n")
-		if #dump1 > 3800 then dump1 = dump1:sub(1, 3800) .. "\n... (truncated)" end
-		postDiscordEmbed({
-			title = "Speed & Zone Diagnostics (Part 1/3: Speed & Mechanics)",
-			description = "```text\n" .. dump1 .. "\n```",
-			color = 0x5865F2,
-		})
-
-		task.wait(1.5)
-
-		-- Part 2: Complete List of Zones in workspace
-		local p2Lines = {}
-		table.insert(p2Lines, "-- Part 2: All Workspace Zones & Hierarchy --")
-		local build = workspace:FindFirstChild("Build")
-		local zoneBuilds = build and build:FindFirstChild("ZoneBuilds")
-		if zoneBuilds then
-			local zoneList = zoneBuilds:GetChildren()
-			table.insert(p2Lines, string.format("workspace.Build.ZoneBuilds: %d zones found", #zoneList))
-			table.sort(zoneList, function(a, b)
-				local numA = tonumber(a.Name:match("(%d+)")) or 9999
-				local numB = tonumber(b.Name:match("(%d+)")) or 9999
-				if numA ~= numB then return numA < numB end
-				return a.Name < b.Name
-			end)
-			for _, z in ipairs(zoneList) do
-				local attrs = z:GetAttributes()
-				local attrPairs = {}
-				for k, v in pairs(attrs) do
-					table.insert(attrPairs, string.format("%s=%s", tostring(k), tostring(v)))
-				end
-				local attrStr = #attrPairs > 0 and (" {" .. table.concat(attrPairs, ", ") .. "}") or ""
-				local eggsF = z:FindFirstChild("Eggs")
-				local eggCount = eggsF and #eggsF:GetChildren() or 0
-				table.insert(p2Lines, string.format("[%s] Eggs: %d%s", z.Name, eggCount, attrStr))
-			end
-		else
-			table.insert(p2Lines, "workspace.Build.ZoneBuilds: NOT FOUND")
-		end
-
-		local otherZones = {}
-		for _, child in ipairs(workspace:GetChildren()) do
-			if child.Name:lower():find("zone") and child ~= build then
-				table.insert(otherZones, string.format("%s (%s, %d children)", child.Name, child.ClassName, #child:GetChildren()))
-			end
-		end
-		if #otherZones > 0 then
-			table.insert(p2Lines, string.format("Other Zone Folders: [%s]", table.concat(otherZones, ", ")))
-		end
-
-		local dump2 = table.concat(p2Lines, "\n")
-		if #dump2 > 3800 then dump2 = dump2:sub(1, 3800) .. "\n... (truncated)" end
-		postDiscordEmbed({
-			title = "Speed & Zone Diagnostics (Part 2/3: All Zones)",
-			description = "```text\n" .. dump2 .. "\n```",
-			color = 0x57F287,
-		})
-
-		task.wait(1.5)
-
-		-- Part 3: Egg Details across zones
-		local p3Lines = {}
-		table.insert(p3Lines, "-- Part 3: Eggs in Each Zone --")
-		if zoneBuilds then
-			local zoneList = zoneBuilds:GetChildren()
-			table.sort(zoneList, function(a, b)
-				local numA = tonumber(a.Name:match("(%d+)")) or 9999
-				local numB = tonumber(b.Name:match("(%d+)")) or 9999
-				return numA < numB
-			end)
-			for _, z in ipairs(zoneList) do
-				local eggsF = z:FindFirstChild("Eggs")
-				if eggsF and #eggsF:GetChildren() > 0 then
-					local eggNames = {}
-					for _, ec in ipairs(eggsF:GetChildren()) do
-						local ep = ec:FindFirstChild("Egg") or (ec:IsA("BasePart") and ec)
-						local eName = ep and (ep:GetAttribute("EggInfoName") or ep:GetAttribute("EggType")) or ec.Name
-						local luck = ep and (ep:GetAttribute("EggInfoLuck") or ep:GetAttribute("HatchLuck")) or ""
-						local hp = ep and ep:GetAttribute("Health") or ""
-						table.insert(eggNames, string.format("%s [L:%s, HP:%s]", tostring(eName), tostring(luck), tostring(hp)))
-					end
-					table.insert(p3Lines, string.format("[%s]: %s", z.Name, table.concat(eggNames, " | ")))
-				end
-			end
-		end
-
-		local dump3 = table.concat(p3Lines, "\n")
-		if #dump3 > 3800 then dump3 = dump3:sub(1, 3800) .. "\n... (truncated)" end
-		postDiscordEmbed({
-			title = "Speed & Zone Diagnostics (Part 3/3: Egg Details)",
-			description = "```text\n" .. dump3 .. "\n```",
-			color = 0xFEE75C,
-		})
-
-		Library:Notify("3-Part Speed & Zone snapshot sent to Webhook!", 4)
-	end)
-end
-
-WebhookBox:AddButton("Scan Speed & Zone Data to Webhook", function()
-	if scanSpeedAndZoneData then
-		scanSpeedAndZoneData()
-	end
-end)
-
---// Temporary diagnostic: how hatched pets are picked up and how plot pets expose Cash/s \\--
-WebhookBox:AddButton("Scan Pet Pickup & Plot Data to Webhook", function()
-	task.spawn(function()
-		if not webhookUrl or webhookUrl == "" then
-			Library:Notify("Please enter a Webhook URL in AFK & Alerts tab first!", 4)
-			return
-		end
-		Library:Notify("Scanning pet pickup & plot data... Sending to Webhook!", 3)
-
-		local function attrString(inst)
-			local parts = {}
-			for k, v in pairs(inst:GetAttributes()) do
-				table.insert(parts, string.format("%s=%s", tostring(k), tostring(v)))
-			end
-			table.sort(parts)
-			return "{" .. table.concat(parts, ", ") .. "}"
-		end
-
-		local function describeInteractables(root, lines, indent)
-			local found = 0
-			for _, d in ipairs(root:GetDescendants()) do
-				if d:IsA("ProximityPrompt") then
-					found += 1
-					table.insert(lines, string.format(
-						"%sPrompt %s: Action=%q Object=%q Hold=%.2f Dist=%s Enabled=%s LoS=%s %s",
-						indent, d:GetFullName():sub(-60), d.ActionText, d.ObjectText, d.HoldDuration,
-						tostring(d.MaxActivationDistance), tostring(d.Enabled), tostring(d.RequiresLineOfSight), attrString(d)
-					))
-				elseif d:IsA("ClickDetector") then
-					found += 1
-					table.insert(lines, string.format("%sClickDetector %s Dist=%s", indent, d:GetFullName():sub(-60), tostring(d.MaxActivationDistance)))
-				elseif d:IsA("TouchTransmitter") then
-					found += 1
-					table.insert(lines, string.format("%sTouch on %s", indent, d.Parent and d.Parent:GetFullName():sub(-60) or "?"))
-				elseif d:IsA("LuaSourceContainer") or d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
-					found += 1
-					table.insert(lines, string.format("%s%s %s", indent, d.ClassName, d:GetFullName():sub(-60)))
-				end
-			end
-			if found == 0 then
-				table.insert(lines, indent .. "No prompts / click detectors / touch / scripts found")
-			end
-		end
-
-		local function postPart(title, lines, color)
-			local dump = table.concat(lines, "\n")
-			if #dump > 3800 then dump = dump:sub(1, 3800) .. "\n... (truncated)" end
-			postDiscordEmbed({ title = title, description = "```text\n" .. dump .. "\n```", color = color })
-		end
-
-		-- Part 1: Hatched pets on the ground
-		local p1 = { "-- Part 1: workspace.AnimalPickups --" }
-		local pickups = workspace:FindFirstChild("AnimalPickups")
-		if pickups then
-			local pets = pickups:GetChildren()
-			table.insert(p1, string.format("AnimalPickups: %d children, Attrs %s", #pets, attrString(pickups)))
-			for i = 1, math.min(3, #pets) do
-				local pet = pets[i]
-				local childNames = {}
-				for _, c in ipairs(pet:GetChildren()) do
-					table.insert(childNames, c.Name .. "(" .. c.ClassName .. ")")
-				end
-				table.insert(p1, string.format("[%d] %s (%s) Attrs %s", i, pet.Name, pet.ClassName, attrString(pet)))
-				table.insert(p1, "    Children: " .. table.concat(childNames, ", "):sub(1, 300))
-				describeInteractables(pet, p1, "    ")
-			end
-		else
-			table.insert(p1, "workspace.AnimalPickups: NOT FOUND")
-		end
-		local carryAttrs = {}
-		for k, v in pairs(player:GetAttributes()) do
-			local kl = tostring(k):lower()
-			if kl:find("carry") or kl:find("hold") or kl:find("animal") or kl:find("pet") or kl:find("steal") then
-				table.insert(carryAttrs, string.format("%s=%s", tostring(k), tostring(v)))
-			end
-		end
-		table.insert(p1, "Player carry/pet attrs: {" .. table.concat(carryAttrs, ", ") .. "}")
-		local character = player.Character
-		if character then
-			table.insert(p1, "Character Attrs " .. attrString(character))
-		end
-		postPart("Pet Pickup Diagnostics (Part 1/3: Ground Pets)", p1, 0x5865F2)
-		task.wait(1.5)
-
-		-- Part 2: My plot and its placed pets
-		local p2 = { "-- Part 2: My Plot --" }
-		local myPlot = nil
-		local plotsFolder = workspace:FindFirstChild("Plots")
-		if plotsFolder then
-			for _, plot in ipairs(plotsFolder:GetChildren()) do
-				if plot:GetAttribute("OwnerUserId") == player.UserId then
-					myPlot = plot
-					break
-				end
-			end
-		end
-		if myPlot then
-			table.insert(p2, string.format("Plot %s Attrs %s", myPlot:GetFullName(), attrString(myPlot)))
-			local childNames = {}
-			for _, c in ipairs(myPlot:GetChildren()) do
-				table.insert(childNames, string.format("%s(%s,%d)", c.Name, c.ClassName, #c:GetChildren()))
-			end
-			table.insert(p2, "Children: " .. table.concat(childNames, ", "):sub(1, 900))
-			local shown = 0
-			for _, d in ipairs(myPlot:GetDescendants()) do
-				if shown >= 4 then break end
-				local petRoot = d:IsA("Model") and d:FindFirstChild("RootPart")
-				if d:GetAttribute("AnimalName") ~= nil or (petRoot and petRoot:FindFirstChild("AnimalOverheadAttachment")) then
-					shown += 1
-					local overheadCps = ""
-					local att = d:FindFirstChild("AnimalOverheadAttachment", true)
-					local cpsFrame = att and att:FindFirstChild("CashPerSecond", true)
-					local cpsLabel = cpsFrame and (cpsFrame:IsA("TextLabel") and cpsFrame or cpsFrame:FindFirstChildWhichIsA("TextLabel"))
-					if cpsLabel then overheadCps = cpsLabel.Text end
-					table.insert(p2, string.format("Pet %s (%s) Attrs %s Overhead=%q", d:GetFullName():sub(-70), d.ClassName, attrString(d), overheadCps))
-				end
-			end
-			if shown == 0 then
-				table.insert(p2, "No placed pet models found (no AnimalName attr / AnimalOverheadAttachment)")
-			end
-		else
-			table.insert(p2, "Owned plot: NOT FOUND in workspace.Plots")
-		end
-		postPart("Pet Pickup Diagnostics (Part 2/3: My Plot)", p2, 0x57F287)
-		task.wait(1.5)
-
-		-- Part 3: Remotes that look pet / pickup related
-		local p3 = { "-- Part 3: Pet-related Remotes --" }
-		local count = 0
-		for _, d in ipairs(cloneref(game:GetService("ReplicatedStorage")):GetDescendants()) do
-			if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") or d:IsA("UnreliableRemoteEvent") then
-				local n = d:GetFullName():lower()
-				if n:find("pick") or n:find("animal") or n:find("pet") or n:find("steal") or n:find("carry") or n:find("grab") or n:find("collect") or n:find("place") or n:find("claim") or n:find("hatch") then
-					count += 1
-					if count <= 60 then
-						table.insert(p3, string.format("%s (%s)", d:GetFullName(), d.ClassName))
-					end
-				end
-			end
-		end
-		table.insert(p3, string.format("Total matching remotes: %d", count))
-		postPart("Pet Pickup Diagnostics (Part 3/3: Remotes)", p3, 0xFEE75C)
-
-		Library:Notify("3-Part Pet Pickup & Plot scan sent to Webhook!", 4)
-	end)
 end)
 
 --============================================================================--
@@ -2861,6 +2474,7 @@ do
 					table.insert(threats, {
 						pos = guardRoot.Position,
 						chasing = chaseState ~= "roaming" and chaseState ~= "idle",
+						zone = tostring(guardModel:GetAttribute("ZoneId") or (guardModel.Parent and guardModel.Parent.Name) or ""),
 					})
 				end
 			end
@@ -2870,10 +2484,14 @@ do
 		return threats
 	end
 
-	-- Closest guard threatening pos: chasing guards count within the full safe distance, roaming guards within half
-	local function findGuardThreat(threats, pos)
+	-- Closest guard threatening pos: chasing guards count within the full safe distance, roaming guards within half.
+	-- With a zone, only guards from that zone count (guards only chase inside their own zone).
+	local function findGuardThreat(threats, pos, zone)
 		local closest, closestDist = nil, math.huge
 		for _, threat in ipairs(threats) do
+			if zone and not isZoneMatching(threat.zone, zone) then
+				continue
+			end
 			local d = Vector3.new(threat.pos.X - pos.X, 0, threat.pos.Z - pos.Z).Magnitude
 			local limit = threat.chasing and autoFarm.GuardDistance or autoFarm.GuardDistance * 0.5
 			if d <= limit and d < closestDist then
@@ -2897,7 +2515,7 @@ do
 			end
 			skippedEggs[eggPart] = nil
 		end
-		if #threats > 0 and findGuardThreat(threats, eggPart.Position) then
+		if #threats > 0 and findGuardThreat(threats, eggPart.Position, zoneName ~= "Workspace" and zoneName or nil) then
 			return true
 		end
 
@@ -3159,7 +2777,7 @@ do
 
 	--// Shared full-speed runner (used for eggs, hatched pets and returning to plot) \\--
 	-- Returns "arrived", "stuck", "guard" (+ threat) or "stopped" (target gone, farm off, died)
-	local function runToTarget(humanoid, rootPart, getPos, reach, stillValid, label)
+	local function runToTarget(humanoid, rootPart, getPos, reach, stillValid, label, zone)
 		local startDist = flatDelta(rootPart.Position, getPos()).Magnitude
 		local runDeadline = os.clock() + (startDist / math.max(humanoid.WalkSpeed, 16)) * 2 + 6
 		local lastProgressPos = rootPart.Position
@@ -3175,7 +2793,7 @@ do
 				return "arrived"
 			end
 
-			local threat = findGuardThreat(getGuardThreats(), rootPart.Position)
+			local threat = findGuardThreat(getGuardThreats(), rootPart.Position, zone)
 			if threat then
 				autoFarm.StopMoving()
 				return "guard", threat
@@ -3354,10 +2972,11 @@ do
 						local despawnAt = tonumber(petModel:GetAttribute("DespawnAtServerTime"))
 						-- Leave pets that will despawn before we can reach them and hold E
 						local tooLate = okNow and despawnAt and (despawnAt - serverNow) < (dist / math.max(walkSpeed, 16) + 3)
-						local guarded = #threats > 0 and findGuardThreat(threats, petRoot.Position)
+						local petZone = petModel:GetAttribute("ZoneId") and tostring(petModel:GetAttribute("ZoneId")) or nil
+						local guarded = #threats > 0 and findGuardThreat(threats, petRoot.Position, petZone)
 						if not tooLate and not guarded then
 							if not best or cps > best.cps or (cps == best.cps and dist < best.dist) then
-								best = { model = petModel, root = petRoot, name = name, rarity = rarity, cps = cps, dist = dist }
+								best = { model = petModel, root = petRoot, name = name, rarity = rarity, cps = cps, dist = dist, zone = petZone }
 							end
 						end
 					end
@@ -3385,7 +3004,8 @@ do
 	end
 
 	-- If the game makes you carry the pet home, run it back to the plot so it gets banked
-	local function returnToPlot(humanoid, rootPart)
+	-- zone = where the pet was taken; only that zone's guards are avoided on the way home
+	local function returnToPlot(humanoid, rootPart, zone)
 		local plot = findOwnedPlot()
 		local target = plot and (plot:FindFirstChild("SpawnPoint") or plot:FindFirstChild("Hitbox"))
 		if not target then
@@ -3397,7 +3017,7 @@ do
 		for _ = 1, 3 do
 			local status, threat = runToTarget(humanoid, rootPart, function()
 				return target.Position
-			end, 4, carrying, "plot")
+			end, 4, carrying, "plot", zone)
 			if status ~= "guard" then
 				break
 			end
@@ -3423,7 +3043,7 @@ do
 		local reach = math.max(4, math.max(petRoot.Size.X, petRoot.Size.Z) / 2 + 2)
 		local status, threat = runToTarget(humanoid, rootPart, function()
 			return petRoot.Position
-		end, reach, onGround, pet.name)
+		end, reach, onGround, pet.name, pet.zone)
 
 		if status == "guard" then
 			skippedPets[petModel] = os.clock() + 10
@@ -3466,7 +3086,7 @@ do
 
 		task.wait(0.4)
 		if autoFarm.TakeReturnToPlot and isCarryingPet(player.Character) then
-			returnToPlot(humanoid, rootPart)
+			returnToPlot(humanoid, rootPart, pet.zone)
 		end
 	end
 
@@ -3567,13 +3187,14 @@ do
 			setFarmTarget(string.format("Target: %s (%s)%s [%s]", eggName, zoneName, luckStr, hpStr))
 
 			local reach = math.clamp(tonumber(autoFarm.Reach) or 7, 4, 15)
+			local eggZone = zoneName ~= "Workspace" and zoneName or nil
 
 			-- 5. Run to the egg at full native speed (direction is applied every frame by applyFarmMove)
 			local status, guardThreat = runToTarget(humanoid, rootPart, function()
 				return egg.Position
 			end, reach, function()
 				return autoFarm.Enabled and isEggAlive(egg)
-			end, "egg")
+			end, "egg", eggZone)
 
 			if status == "stuck" then
 				skippedEggs[egg] = os.clock() + 20
@@ -3603,7 +3224,7 @@ do
 						break
 					end
 
-					guardThreat = findGuardThreat(getGuardThreats(), rootPart.Position)
+					guardThreat = findGuardThreat(getGuardThreats(), rootPart.Position, eggZone)
 					if guardThreat then
 						break
 					end
