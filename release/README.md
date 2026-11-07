@@ -54,7 +54,7 @@ Change any keybind in the menu. Your settings are saved automatically.
 
 ## Steal a Balut
 
-Work in progress. Anti-AFK and saved settings are available now; automation features are coming.
+Work in progress. Anti-AFK and saved settings are available now; automation features are coming. The **Data Scan** tab can send the game's structure and a live capture of your actions to a Discord webhook as a .txt file.
 
 ## Executor requirements
 
