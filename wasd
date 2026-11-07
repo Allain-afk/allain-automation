@@ -36,7 +36,8 @@ end) and cloneref(game:GetService("VirtualInputManager")) or nil
 local player = Players.LocalPlayer or Players.PlayerAdded:Wait()
 
 --// Load Alexandria Library & SaveManager \\--
-local repo = "https://raw.githubusercontent.com/Allain-afk/allain-automation/main/"
+-- Public release repo (auto-published from the private source repo by .github/workflows/publish-release.yml)
+local repo = "https://raw.githubusercontent.com/Allain-afk/allain-automation-release/main/"
 local scriptUrl = repo .. "wasd"
 local okLib, Library = pcall(function()
 	return loadstring(game:HttpGet(repo .. "Library.lua"))()
@@ -226,7 +227,7 @@ local isReconnecting = false
 local Window = Library:CreateWindow({
 	Title = "Break and Steal an Egg Keyless - by Allain",
 	Footer = "Allain-afk · Break and Steal an Egg",
-	FooterRight = "v3.1 beta",
+	FooterRight = "v3.2",
 	Username = true,
 	Badge = "Idle",
 	Size = UDim2.fromOffset(870, 690),
@@ -787,7 +788,7 @@ do
 		Tooltip = "Shows other players through walls with customizable overhead tags",
 	})
 		:AddKeyPicker("EspKey", {
-			Default = "E",
+			Default = "T",
 			Mode = "Toggle",
 			SyncToggleState = true,
 			Text = "Player ESP",

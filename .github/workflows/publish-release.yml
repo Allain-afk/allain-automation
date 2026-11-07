@@ -1,0 +1,59 @@
+name: Publish release files
+
+# Copies only the files the loadstring needs into the public release repo,
+# so this source repo can stay private.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - wasd
+      - Library.lua
+      - addons/SaveManager.lua
+      - LICENSE
+      - release/**
+      - .github/workflows/publish-release.yml
+  workflow_dispatch:
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Check out release repo
+        uses: actions/checkout@v4
+        with:
+          repository: Allain-afk/allain-automation-release
+          token: ${{ secrets.RELEASE_REPO_TOKEN }}
+          path: release
+
+      - name: Copy release files
+        run: |
+          mkdir -p release/addons
+          cp source/wasd release/wasd
+          cp source/Library.lua release/Library.lua
+          cp source/addons/SaveManager.lua release/addons/SaveManager.lua
+          # Keep the release repo's own LICENSE; ship the UI library's MIT notice alongside it
+          cp source/LICENSE release/LICENSE-UI-LIBRARY
+          cp source/release/README.md release/README.md
+
+      - name: Commit and push
+        working-directory: release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Release files already up to date."
+            exit 0
+          fi
+          git commit -m "Publish ${GITHUB_SHA::7} from source repo"
+          git push
