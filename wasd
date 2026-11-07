@@ -2573,6 +2573,80 @@ do
 		return false
 	end
 
+	--// Zone streaming: remember where each zone is, so zones that are not streamed in yet can be loaded \\--
+	local ZONE_POS_FILE = "AllainAutomation/wasd/zone_positions.json"
+	local zonePositions = {}
+	local zonePositionsDirty = false
+	local lastZonePosSave = 0
+	local lastZoneEggCount = 0
+
+	pcall(function()
+		if isfile and readfile and isfile(ZONE_POS_FILE) then
+			for name, xyz in pairs(HttpService:JSONDecode(readfile(ZONE_POS_FILE))) do
+				zonePositions[name] = Vector3.new(xyz[1], xyz[2], xyz[3])
+			end
+		end
+	end)
+
+	local function saveZonePositions()
+		if not zonePositionsDirty or not writefile or os.clock() - lastZonePosSave < 10 then
+			return
+		end
+		zonePositionsDirty = false
+		lastZonePosSave = os.clock()
+		pcall(function()
+			local data = {}
+			for name, pos in pairs(zonePositions) do
+				data[name] = { pos.X, pos.Y, pos.Z }
+			end
+			writefile(ZONE_POS_FILE, HttpService:JSONEncode(data))
+		end)
+	end
+
+	-- Record a zone's position from its streamed-in egg parts (average of up to 8 eggs)
+	local function learnZonePosition(zoneName, eggsFolder)
+		if zonePositions[zoneName] or not eggsFolder then
+			return
+		end
+		local sum, count = Vector3.zero, 0
+		for _, eggContainer in ipairs(eggsFolder:GetChildren()) do
+			local part = eggContainer:IsA("BasePart") and eggContainer or eggContainer:FindFirstChildWhichIsA("BasePart", true)
+			if part then
+				sum += part.Position
+				count += 1
+				if count >= 8 then
+					break
+				end
+			end
+		end
+		if count > 0 then
+			zonePositions[zoneName] = sum / count
+			zonePositionsDirty = true
+		end
+	end
+
+	-- Known position of the selected zone: learned earlier, or the zone model's own pivot when the game provides one
+	local function getZonePosition(selectedZone)
+		for name, pos in pairs(zonePositions) do
+			if isZoneMatching(name, selectedZone) then
+				return pos, name
+			end
+		end
+		local build = workspace:FindFirstChild("Build")
+		local zoneBuilds = build and build:FindFirstChild("ZoneBuilds")
+		for _, zoneFolder in ipairs(zoneBuilds and zoneBuilds:GetChildren() or {}) do
+			if isZoneMatching(zoneFolder.Name, selectedZone) and zoneFolder:IsA("Model") then
+				local ok, pivot = pcall(function()
+					return zoneFolder:GetPivot()
+				end)
+				if ok and pivot and pivot.Position.Magnitude > 1 then
+					return pivot.Position, zoneFolder.Name
+				end
+			end
+		end
+		return nil
+	end
+
 	local function findBestCandidateEgg(rootPart)
 		local candidates = {}
 		local build = workspace:FindFirstChild("Build")
@@ -2580,13 +2654,17 @@ do
 		local myRootPos = rootPart.Position
 		local threats = getGuardThreats()
 		local guardedCount = 0
+		local zoneEggCount = 0
 
 		if zoneBuilds then
 			for _, zoneFolder in ipairs(zoneBuilds:GetChildren()) do
 				local zoneName = zoneFolder.Name
+				local zoneEggs = zoneFolder:FindFirstChild("Eggs")
+				learnZonePosition(zoneName, zoneEggs)
 
-				local eggsFolder = isZoneMatching(zoneName, autoFarm.Zone) and zoneFolder:FindFirstChild("Eggs")
+				local eggsFolder = isZoneMatching(zoneName, autoFarm.Zone) and zoneEggs
 				if eggsFolder then
+					zoneEggCount += #eggsFolder:GetChildren()
 					for _, eggContainer in ipairs(eggsFolder:GetChildren()) do
 						if not eggContainer.Name:lower():find("nest") then
 							local eggPart = eggContainer:FindFirstChild("Egg")
@@ -2613,6 +2691,8 @@ do
 		end
 
 		lastGuardedCount = guardedCount
+		lastZoneEggCount = zoneEggCount
+		saveZonePositions()
 		if #candidates == 0 then
 			return nil
 		end
@@ -3172,6 +3252,67 @@ do
 		end
 	end)
 
+	-- The selected zone has no eggs streamed in (e.g. starting from the plot): ask Roblox to stream that area in,
+	-- and if that is not enough, run toward the zone at normal speed until its eggs load
+	local lastStreamRequest = 0
+
+	local function selectedZoneHasEggs()
+		local build = workspace:FindFirstChild("Build")
+		local zoneBuilds = build and build:FindFirstChild("ZoneBuilds")
+		for _, zoneFolder in ipairs(zoneBuilds and zoneBuilds:GetChildren() or {}) do
+			if isZoneMatching(zoneFolder.Name, autoFarm.Zone) then
+				local eggsFolder = zoneFolder:FindFirstChild("Eggs")
+				if eggsFolder and #eggsFolder:GetChildren() > 0 then
+					return true
+				end
+			end
+		end
+		return false
+	end
+
+	local function loadSelectedZone(humanoid, rootPart)
+		autoFarm.Target = nil
+		local zonePos, zoneName = getZonePosition(autoFarm.Zone)
+		if not zonePos then
+			autoFarm.StopMoving()
+			setFarmTarget("Target: " .. tostring(autoFarm.Zone) .. " is not loaded yet")
+			setFarmState("Visit that zone once so the farm learns where it is")
+			task.wait(1)
+			return
+		end
+
+		if os.clock() - lastStreamRequest > 5 then
+			lastStreamRequest = os.clock()
+			setFarmTarget("Target: Loading " .. tostring(zoneName) .. "...")
+			setFarmState("Requesting zone to stream in...")
+			pcall(function()
+				player:RequestStreamAroundAsync(zonePos, 5)
+			end)
+			if selectedZoneHasEggs() then
+				return
+			end
+		end
+
+		setFarmTarget("Target: Heading to " .. tostring(zoneName) .. " to load its eggs")
+		local status, threat = runToTarget(humanoid, rootPart, function()
+			return zonePos
+		end, 40, function()
+			return autoFarm.Enabled and not selectedZoneHasEggs()
+		end, tostring(zoneName), zoneName)
+
+		if status == "guard" then
+			retreatFromGuard(humanoid, rootPart, threat.pos)
+		elseif status == "stuck" then
+			-- Blocked on the way (e.g. a locked zone gate): back off before trying again
+			setFarmState("Path to " .. tostring(zoneName) .. " blocked, retrying soon...")
+			task.wait(3)
+		elseif status == "arrived" then
+			-- At the zone but no eggs have spawned yet
+			setFarmState("Waiting for egg spawns...")
+			task.wait(1)
+		end
+	end
+
 	--// Main Zone Auto-Farm Loop \\--
 	task.spawn(function()
 		local lastAfkPulse = 0
@@ -3226,6 +3367,10 @@ do
 
 			-- 4. Select target egg
 			local egg, zoneName, eggName, luck, hp = findBestCandidateEgg(rootPart)
+			if not egg and lastZoneEggCount == 0 and autoFarm.Zone ~= "All Zones" and autoFarm.Zone ~= "" then
+				loadSelectedZone(humanoid, rootPart)
+				continue
+			end
 			if not egg then
 				autoFarm.Target = nil
 				autoFarm.StopMoving()
