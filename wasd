@@ -496,39 +496,29 @@ do
 		"Prism Egg",
 		"Ethereal Egg",
 	}
-	local function collectAllWorldZones()
-		local zones = { "All Zones" }
-		local maxZone = 12
+	-- Only the zones that currently exist in-game (workspace.Build.ZoneBuilds), sorted by zone number
+	autoFarm.CollectZones = function()
+		local zones = {}
 		local build = workspace:FindFirstChild("Build")
 		local zoneBuilds = build and build:FindFirstChild("ZoneBuilds")
-
 		if zoneBuilds then
 			for _, child in ipairs(zoneBuilds:GetChildren()) do
-				local num = tonumber(child.Name:match("(%d+)"))
-				if num and num > maxZone then
-					maxZone = num
-				end
+				table.insert(zones, child.Name)
 			end
 		end
-
-		for _, child in ipairs(workspace:GetChildren()) do
-			if (child:IsA("Folder") or child:IsA("Model")) and child.Name:match("^[Zz]one") then
-				local num = tonumber(child.Name:match("(%d+)"))
-				if num and num > maxZone then
-					maxZone = num
-				end
+		table.sort(zones, function(a, b)
+			local numA = tonumber(a:match("(%d+)")) or math.huge
+			local numB = tonumber(b:match("(%d+)")) or math.huge
+			if numA ~= numB then
+				return numA < numB
 			end
-		end
-
-		local totalToDisplay = math.max(maxZone, 25)
-		for i = 1, totalToDisplay do
-			table.insert(zones, "Zone " .. tostring(i))
-		end
-
+			return a < b
+		end)
+		table.insert(zones, 1, "All Zones")
 		return zones
 	end
 
-	local knownZoneList = collectAllWorldZones()
+	local knownZoneList = autoFarm.CollectZones()
 
 	autoFarm.Box = Tabs.Automation:AddGroupbox({
 		Side = "Left",
@@ -2395,7 +2385,6 @@ end)
 
 do
 	local registeredEggTypes = {}
-	local registeredZones = {}
 	local skippedEggs = {}
 	local FARM_RENDER_STEP = "AllainZoneAutoFarmMove"
 
@@ -2588,14 +2577,6 @@ do
 		if zoneBuilds then
 			for _, zoneFolder in ipairs(zoneBuilds:GetChildren()) do
 				local zoneName = zoneFolder.Name
-				if not registeredZones[zoneName] then
-					registeredZones[zoneName] = true
-					if Options.AutoFarmZone then
-						pcall(function()
-							Options.AutoFarmZone:AddValues(zoneName)
-						end)
-					end
-				end
 
 				local eggsFolder = isZoneMatching(zoneName, autoFarm.Zone) and zoneFolder:FindFirstChild("Eggs")
 				if eggsFolder then
@@ -2648,6 +2629,42 @@ do
 		local top = candidates[1]
 		return top.part, top.zone, top.name, top.luck, top.hp
 	end
+
+	--// Keep the Target Zone dropdown in sync with the zones currently loaded in-game \\--
+	task.spawn(function()
+		local lastZoneKey = table.concat(Options.AutoFarmZone and Options.AutoFarmZone.Values or {}, "|")
+
+		while not Library.Unloaded do
+			local dropdown = Options.AutoFarmZone
+			local zones = autoFarm.CollectZones()
+			local zoneKey = table.concat(zones, "|")
+
+			-- Skip while zones are still streaming in so a saved selection is not wiped
+			if dropdown and #zones > 1 and zoneKey ~= lastZoneKey then
+				lastZoneKey = zoneKey
+				local current = autoFarm.Zone
+				pcall(function()
+					dropdown:SetValues(zones)
+				end)
+
+				if not table.find(zones, current) then
+					-- Map older saved names (e.g. "Zone 5") onto the matching live zone
+					local replacement = "All Zones"
+					for i = 2, #zones do
+						if isZoneMatching(zones[i], current) then
+							replacement = zones[i]
+							break
+						end
+					end
+					pcall(function()
+						dropdown:SetValue(replacement)
+					end)
+				end
+			end
+
+			task.wait(3)
+		end
+	end)
 
 	local function setFarmState(text)
 		if autoFarm.StateLabel then
