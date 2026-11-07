@@ -5221,6 +5221,41 @@ Toggles.AutoTakeReturnToPlot:OnChanged(function(Value)
 	autoSaveActiveConfig()
 end)
 
+--// Toggle Feedback Notifications ("<Feature> Activated / Deactivated") \\--
+-- Wraps each toggle's RunChanged so it fires alongside the existing OnChanged handlers.
+-- Suppressed during startup autoload and manual config loads to avoid notification spam.
+local suppressToggleNotify = false
+do
+	local origLoad = SaveManager.Load
+	SaveManager.Load = function(self, ...)
+		suppressToggleNotify = true
+		local results = table.pack(pcall(origLoad, self, ...))
+		suppressToggleNotify = false
+		if not results[1] then
+			error(results[2], 0)
+		end
+		return table.unpack(results, 2, results.n)
+	end
+
+	for _, toggle in pairs(Toggles) do
+		local origRunChanged = toggle.RunChanged
+		local lastValue = toggle.Value
+		local label = tostring(toggle.Text or ""):gsub("^Enable%s+", "")
+		toggle.RunChanged = function(self, ...)
+			origRunChanged(self, ...)
+			local value = self.Value and true or false
+			if value == lastValue then
+				return
+			end
+			lastValue = value
+			if isInitializingConfig or suppressToggleNotify or self.Disabled or label == "" then
+				return
+			end
+			Library:Notify(label .. (value and " Activated" or " Deactivated"), 2)
+		end
+	end
+end
+
 --// Load Autoload Config on Startup \\--
 SaveManager:LoadAutoloadConfig()
 task.delay(0.6, function()
