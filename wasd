@@ -1,0 +1,103 @@
+--// Allain Automation Loader \\--
+-- Public entry point for every game. Detects which game you're in and loads its script.
+--   loadstring(game:HttpGet("https://raw.githubusercontent.com/Allain-afk/allain-automation-release/main/wasd"))()
+-- Game scripts live in games/ and are published next to this file by .github/workflows/publish-release.yml.
+
+local repo = "https://raw.githubusercontent.com/Allain-afk/allain-automation-release/main/"
+
+-- Detection order: universe GameId, then PlaceId, then a name match on the place's title.
+-- Fill in the IDs (run `print(game.GameId, game.PlaceId)` in-game) so copycat games with
+-- similar names can't trigger the wrong script. Name matching is only a fallback.
+local GAMES = {
+	{
+		name = "Break and Steal an Egg",
+		file = "games/break-and-steal-an-egg.lua",
+		gameIds = {},
+		placeIds = {},
+		nameMatches = { "break and steal" },
+	},
+	{
+		name = "Steal a Balut",
+		file = "games/steal-a-balut.lua",
+		gameIds = {},
+		placeIds = {},
+		nameMatches = { "steal a balut" },
+	},
+}
+
+if not game:IsLoaded() then
+	game.Loaded:Wait()
+end
+
+local function notify(text)
+	pcall(function()
+		game:GetService("StarterGui"):SetCore("SendNotification", {
+			Title = "Allain Automation",
+			Text = text,
+			Duration = 8,
+		})
+	end)
+end
+
+local function hasId(list, id)
+	for _, v in ipairs(list) do
+		if v == id then
+			return true
+		end
+	end
+	return false
+end
+
+local function detectGame()
+	for _, entry in ipairs(GAMES) do
+		if hasId(entry.gameIds, game.GameId) or hasId(entry.placeIds, game.PlaceId) then
+			return entry
+		end
+	end
+
+	local ok, info = pcall(function()
+		return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
+	end)
+	local placeName = (ok and type(info) == "table" and type(info.Name) == "string") and info.Name:lower() or ""
+	if placeName ~= "" then
+		for _, entry in ipairs(GAMES) do
+			for _, pattern in ipairs(entry.nameMatches) do
+				if placeName:find(pattern, 1, true) then
+					return entry
+				end
+			end
+		end
+	end
+	return nil, placeName
+end
+
+local entry, placeName = detectGame()
+if not entry then
+	local msg = string.format(
+		"Unsupported game (%s | GameId %d, PlaceId %d).",
+		placeName ~= "" and placeName or "unknown",
+		game.GameId,
+		game.PlaceId
+	)
+	warn("[Allain Loader] " .. msg)
+	notify(msg)
+	return
+end
+
+local okFetch, source = pcall(function()
+	return game:HttpGet(repo .. entry.file)
+end)
+if not okFetch or type(source) ~= "string" then
+	warn("[Allain Loader] Failed to download " .. entry.name .. " script: " .. tostring(source))
+	notify("Failed to download the " .. entry.name .. " script.")
+	return
+end
+
+local chunk, compileErr = loadstring(source)
+if not chunk then
+	warn("[Allain Loader] Failed to compile " .. entry.name .. " script: " .. tostring(compileErr))
+	notify("Failed to load the " .. entry.name .. " script.")
+	return
+end
+
+return chunk()

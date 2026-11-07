@@ -38,7 +38,7 @@ local player = Players.LocalPlayer or Players.PlayerAdded:Wait()
 --// Load Alexandria Library & SaveManager \\--
 -- Public release repo (auto-published from the private source repo by .github/workflows/publish-release.yml)
 local repo = "https://raw.githubusercontent.com/Allain-afk/allain-automation-release/main/"
-local scriptUrl = repo .. "wasd"
+local scriptUrl = repo .. "wasd" -- the game loader; it re-detects this game after a rejoin
 local okLib, Library = pcall(function()
 	return loadstring(game:HttpGet(repo .. "Library.lua"))()
 end)

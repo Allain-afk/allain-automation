@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - wasd
+      - games/**
       - Library.lua
       - addons/SaveManager.lua
       - LICENSE
@@ -39,6 +40,9 @@ jobs:
         run: |
           mkdir -p release/addons
           cp source/wasd release/wasd
+          # Mirror games/ exactly so removed game scripts are removed from the release too
+          rm -rf release/games
+          cp -r source/games release/games
           cp source/Library.lua release/Library.lua
           cp source/addons/SaveManager.lua release/addons/SaveManager.lua
           # Keep the release repo's own LICENSE; ship the UI library's MIT notice alongside it

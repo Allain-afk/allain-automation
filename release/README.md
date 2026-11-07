@@ -1,10 +1,15 @@
-# Break and Steal an Egg — Keyless Script by Allain
+# Allain Automation — Keyless Scripts by Allain
 
-Keyless automation script for **Break and Steal an Egg** on Roblox. Current version: **v3.2**.
+Keyless automation scripts for Roblox. One loadstring works for every supported game: it detects which game you're in and loads the right script.
+
+| Game | Version |
+| --- | --- |
+| Break and Steal an Egg | v3.2 |
+| Steal a Balut | v0.1 (in progress) |
 
 ## How to run
 
-Paste this into your executor and run it while in the game:
+Paste this into your executor and run it while in a supported game:
 
 ```lua
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Allain-afk/allain-automation-release/main/wasd"))()
@@ -12,7 +17,9 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/Allain-afk/allain-aut
 
 Press **RightShift** to show or hide the menu (you can change this in the **Config** tab).
 
-## Features
+## Break and Steal an Egg
+
+### Features
 
 **Automation**
 - **Zone Auto-Farm**: runs to eggs in the zone you pick and breaks them with the in-game Auto Swing. Filter by egg type, minimum luck and priority (closest, highest luck, lowest HP).
@@ -31,7 +38,7 @@ All movement uses your character's normal in-game speed. The script never change
 - Low Power mode.
 - Discord webhook alerts for rare pets, progress reports and farm summaries.
 
-## Default keybinds
+### Default keybinds
 
 | Key | Toggles |
 | --- | --- |
@@ -44,6 +51,10 @@ All movement uses your character's normal in-game speed. The script never change
 | L | Low Power mode |
 
 Change any keybind in the menu. Your settings are saved automatically.
+
+## Steal a Balut
+
+Work in progress. Anti-AFK and saved settings are available now; automation features are coming.
 
 ## Executor requirements
 
