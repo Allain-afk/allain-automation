@@ -192,6 +192,7 @@ local autoFarm = {
 	Priority = "Closest Egg",
 	MinLuck = 0,
 	Reach = 7,
+	NextEggDelay = 0,
 	EggsBroken = 0,
 	Target = nil,
 	MoveDir = nil,
@@ -609,6 +610,16 @@ do
 		Rounding = 1,
 		Suffix = " studs",
 		Tooltip = "Distance to stop from the egg so in-game Auto Swing engages",
+	})
+
+	autoFarm.Box:AddSlider("AutoFarmNextEggDelay", {
+		Text = "Next Egg Delay",
+		Default = autoFarm.NextEggDelay,
+		Min = 0,
+		Max = 5,
+		Rounding = 3,
+		Suffix = " s",
+		Tooltip = "How long to wait after breaking an egg before moving to the next one (0.000 - 5.000 seconds)",
 	})
 
 	autoFarm.Box:AddDivider()
@@ -2391,6 +2402,7 @@ do
 	-- Guardrail: the in-game Auto Swing only breaks eggs with the pickaxe (hotbar slot 1) in hand,
 	-- so switch back to it whenever another slot (or nothing) is held. Returns true when it had to switch.
 	local lastSlotPress = 0
+	local PICKAXE_EQUIP_DELAY = 1
 
 	local function isPickaxe(tool)
 		return tool ~= nil and (tool == autoFarm.PickaxeTool or tool.Name:lower():find("pickaxe") ~= nil)
@@ -2399,6 +2411,20 @@ do
 	local function ensurePickaxeEquipped(character, humanoid)
 		if not character or not humanoid then return false end
 		local heldTool = character:FindFirstChildOfClass("Tool")
+		if isPickaxe(heldTool) then
+			autoFarm.PickaxeTool = heldTool
+			return false
+		end
+
+		-- Short, human-like pause before switching back, then re-check in case the player already did
+		if autoFarm.StateLabel then
+			autoFarm.StateLabel:SetText("Farm State: Equipping pickaxe in 1s...")
+		end
+		task.wait(PICKAXE_EQUIP_DELAY)
+		if not autoFarm.Enabled or humanoid.Health <= 0 then
+			return false
+		end
+		heldTool = character:FindFirstChildOfClass("Tool")
 		if isPickaxe(heldTool) then
 			autoFarm.PickaxeTool = heldTool
 			return false
@@ -3317,7 +3343,17 @@ do
 				end
 				updateFarmStats()
 				setFarmTarget("Target: Egg broken! Finding next...")
-				task.wait(0.1)
+
+				local delay = math.clamp(tonumber(autoFarm.NextEggDelay) or 0, 0, 5)
+				if delay > 0 then
+					setFarmState(string.format("Next egg in %.3fs...", delay))
+					local resumeAt = os.clock() + delay
+					while autoFarm.Enabled and not Library.Unloaded and os.clock() < resumeAt do
+						task.wait(math.min(0.05, resumeAt - os.clock()))
+					end
+				else
+					task.wait(0.1)
+				end
 			end
 		end
 	end)
@@ -4966,6 +5002,11 @@ end)
 
 Options.AutoFarmReach:OnChanged(function(Value)
 	autoFarm.Reach = tonumber(Value) or 7
+	autoSaveActiveConfig()
+end)
+
+Options.AutoFarmNextEggDelay:OnChanged(function(Value)
+	autoFarm.NextEggDelay = tonumber(Value) or 0
 	autoSaveActiveConfig()
 end)
 
