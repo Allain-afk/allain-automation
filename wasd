@@ -183,6 +183,19 @@ local autoUpgradeTreadmillEnabled = false
 local autoSwingEnabled = true
 local autoProgressionInterval = 6
 
+-- Zone Auto-Farm state and UI refs live in one table to stay under the Luau 200-local limit
+local autoFarm = {
+	Enabled = false,
+	Zone = "All Zones",
+	EggsSelected = {},
+	Priority = "Closest Egg",
+	MinLuck = 0,
+	Reach = 7,
+	EggsBroken = 0,
+	Target = nil,
+	MoveDir = nil,
+}
+
 local anchorPosition = nil
 local sessionStartTime = os.clock()
 local completedCycles = 0
@@ -455,6 +468,150 @@ do
 		Tooltip = "How often the automation checks your Cash and triggers affordable upgrades",
 	})
 
+	--// Zone Auto-Farm (Safe Walking & In-Game Auto Swing)
+	local knownEggList = {
+		"Forest Egg",
+		"Rock Egg",
+		"Swamp Egg",
+		"Bones Egg",
+		"Scorpion Egg",
+		"Cactus Egg",
+		"Yeti Egg",
+		"Frozen Egg",
+		"Frosty Egg",
+		"Rainbow Egg",
+		"Easter Bunny Egg",
+		"Candy Egg",
+		"Bug Egg",
+		"Magma Egg",
+		"Stone Egg",
+		"Desert Egg",
+		"Grass Egg",
+		"Aqua Egg",
+		"Golden Egg",
+		"Obsidian Egg",
+		"Cyber Egg",
+		"Galaxy Egg",
+		"Infernal Egg",
+		"Prism Egg",
+		"Ethereal Egg",
+	}
+	local function collectAllWorldZones()
+		local zones = { "All Zones" }
+		local maxZone = 12
+		local build = workspace:FindFirstChild("Build")
+		local zoneBuilds = build and build:FindFirstChild("ZoneBuilds")
+
+		if zoneBuilds then
+			for _, child in ipairs(zoneBuilds:GetChildren()) do
+				local num = tonumber(child.Name:match("(%d+)"))
+				if num and num > maxZone then
+					maxZone = num
+				end
+			end
+		end
+
+		for _, child in ipairs(workspace:GetChildren()) do
+			if (child:IsA("Folder") or child:IsA("Model")) and child.Name:match("^[Zz]one") then
+				local num = tonumber(child.Name:match("(%d+)"))
+				if num and num > maxZone then
+					maxZone = num
+				end
+			end
+		end
+
+		local totalToDisplay = math.max(maxZone, 25)
+		for i = 1, totalToDisplay do
+			table.insert(zones, "Zone " .. tostring(i))
+		end
+
+		return zones
+	end
+
+	local knownZoneList = collectAllWorldZones()
+
+	autoFarm.Box = Tabs.Automation:AddGroupbox({
+		Side = "Left",
+		Name = "Zone Auto-Farm",
+		IconName = "swords",
+		Description = "Runs to and breaks eggs in selected zones at your full in-game speed.",
+	})
+
+	autoFarm.Box:AddCheckbox("AutoFarmEnabled", {
+		Text = "Enable Zone Auto-Farm",
+		Default = false,
+		Tooltip = "Runs to target eggs at your full in-game run speed; in-game Auto Swing automatically breaks them",
+	}):AddKeyPicker("AutoFarmKey", {
+		Default = "H",
+		Mode = "Toggle",
+		SyncToggleState = true,
+		Text = "Zone Auto-Farm",
+	})
+
+	autoFarm.Box:AddDropdown("AutoFarmZone", {
+		Text = "Target Zone",
+		Values = knownZoneList,
+		Default = "All Zones",
+		Searchable = true,
+		Tooltip = "Select which zone to farm eggs in",
+	})
+
+	autoFarm.Box:AddDropdown("AutoFarmEggs", {
+		Text = "Target Egg Filter",
+		Values = knownEggList,
+		Multi = true,
+		Searchable = true,
+		Default = {},
+		Tooltip = "Select specific eggs to break (leave empty to break all eggs in the zone)",
+	})
+
+	autoFarm.Box:AddButton("Select All Eggs", function()
+		local all = {}
+		for _, name in ipairs(knownEggList) do
+			all[name] = true
+		end
+		Options.AutoFarmEggs:SetValue(all)
+	end):AddButton("Clear Egg Filter", function()
+		Options.AutoFarmEggs:SetValue({})
+	end)
+
+	autoFarm.Box:AddDropdown("AutoFarmPriority", {
+		Text = "Target Priority",
+		Values = { "Closest Egg", "Highest Luck Egg", "Lowest HP Egg" },
+		Default = "Closest Egg",
+		Tooltip = "Order in which candidate eggs are targeted",
+	})
+
+	autoFarm.Box:AddSlider("AutoFarmMinLuck", {
+		Text = "Min Egg Luck Filter",
+		Default = 0,
+		Min = 0,
+		Max = 2000,
+		Rounding = 0,
+		Suffix = "x Luck",
+		Tooltip = "Only target eggs with Luck multiplier >= this value (0x = target all)",
+	})
+
+	autoFarm.Box:AddSlider("AutoFarmReach", {
+		Text = "Egg Break Distance",
+		Default = autoFarm.Reach,
+		Min = 4,
+		Max = 15,
+		Rounding = 1,
+		Suffix = " studs",
+		Tooltip = "Distance to stop from the egg so in-game Auto Swing engages",
+	})
+
+	autoFarm.Box:AddDivider()
+
+	autoFarm.Box:AddButton("Scan Speed & Zone Data to Webhook", function()
+		if scanSpeedAndZoneData then
+			scanSpeedAndZoneData()
+		else
+			Library:Notify("Diagnostic function loading...", 2)
+		end
+	end)
+
 	local AutoStatusBox = Tabs.Automation:AddGroupbox({
 		Side = "Right",
 		Name = "Live Progression Status",
@@ -489,6 +646,23 @@ do
 
 	AutoSwingStatusLabel = AutoStatusBox:AddLabel("AutoSwingStatusLabel", {
 		Text = "Auto Swing: Checking...",
+		DoesWrap = true,
+	})
+
+	AutoStatusBox:AddDivider()
+
+	autoFarm.TargetLabel = AutoStatusBox:AddLabel("AutoFarmTargetLabel", {
+		Text = "Farm Target: Idle",
+		DoesWrap = true,
+	})
+
+	autoFarm.StateLabel = AutoStatusBox:AddLabel("AutoFarmStateLabel", {
+		Text = "Farm State: Off",
+		DoesWrap = true,
+	})
+
+	autoFarm.StatsLabel = AutoStatusBox:AddLabel("AutoFarmStatsLabel", {
+		Text = "Eggs Broken: 0",
 		DoesWrap = true,
 	})
 
@@ -2176,8 +2350,13 @@ end
 task.spawn(function()
 	while not Library.Unloaded do
 		if isRunning then
+			if autoFarm.Enabled then
+				highlightKey(nil)
+				task.wait(0.4)
+				continue
+			end
 			for _, dir in ipairs(directions) do
-				if not isRunning or Library.Unloaded then
+				if not isRunning or Library.Unloaded or autoFarm.Enabled then
 					break
 				end
 				StatusLabel:SetText("Status: Moving " .. dir.label)
@@ -2187,16 +2366,19 @@ task.spawn(function()
 			end
 			highlightKey(nil)
 
-			if isRunning and not Library.Unloaded then
+			if isRunning and not Library.Unloaded and not autoFarm.Enabled then
 				returnToAnchor()
 				completedCycles += 1
 				CyclesLabel:SetText("Cycles Completed: " .. tostring(completedCycles))
 			end
 
-			if isRunning and not Library.Unloaded and pauseDuration > 0 then
+			if isRunning and not Library.Unloaded and pauseDuration > 0 and not autoFarm.Enabled then
 				StatusLabel:SetText(string.format("Status: Waiting (%.1fs)", pauseDuration))
 				local waitStart = os.clock()
 				while isRunning and not Library.Unloaded and (os.clock() - waitStart) < pauseDuration do
+					if autoFarm.Enabled then
+						break
+					end
 					task.wait(0.1)
 				end
 			end
@@ -2206,6 +2388,439 @@ task.spawn(function()
 		end
 	end
 end)
+
+--============================================================================--
+--// Zone Auto-Farm & Egg Breaker Engine (Full Native Run Speed + Native Auto-Swing)
+--============================================================================--
+
+do
+	local registeredEggTypes = {}
+	local registeredZones = {}
+	local skippedEggs = {}
+	local FARM_RENDER_STEP = "AllainZoneAutoFarmMove"
+
+	-- The default ControlModule calls Humanoid:Move every frame at Input priority, which zeroes any
+	-- direction set from Heartbeat (the character never ran). Steering after it, at Character priority,
+	-- keeps our direction applied so the character runs at its full in-game WalkSpeed.
+	local function applyFarmMove()
+		local dir = autoFarm.MoveDir
+		if not dir or not autoFarm.Enabled then
+			return
+		end
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hum and hum.Health > 0 then
+			hum:Move(dir, false)
+		end
+	end
+
+	pcall(function()
+		RunService:UnbindFromRenderStep(FARM_RENDER_STEP)
+	end)
+	local bound = pcall(function()
+		RunService:BindToRenderStep(FARM_RENDER_STEP, Enum.RenderPriority.Character.Value + 1, applyFarmMove)
+	end)
+	if not bound then
+		autoFarm.MoveConn = RunService.RenderStepped:Connect(applyFarmMove)
+	end
+
+	autoFarm.StopMoving = function()
+		autoFarm.MoveDir = nil
+		pcall(function()
+			local char = player.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			if hum then
+				hum:Move(Vector3.zero, false)
+			end
+		end)
+	end
+
+	autoFarm.Cleanup = function()
+		autoFarm.StopMoving()
+		pcall(function()
+			RunService:UnbindFromRenderStep(FARM_RENDER_STEP)
+		end)
+		if autoFarm.MoveConn then
+			autoFarm.MoveConn:Disconnect()
+			autoFarm.MoveConn = nil
+		end
+	end
+
+	local function getCleanEggName(eggPart)
+		local rawName = eggPart:GetAttribute("EggInfoName") or eggPart:GetAttribute("EggType")
+		if not rawName or rawName == "" then
+			local pName = eggPart.Parent and eggPart.Parent.Name or eggPart.Name
+			rawName = pName:gsub("^%d+:%s*", ""):gsub("^Zone_%d+_", "")
+		end
+		return tostring(rawName or "Egg"):match("^%s*(.-)%s*$")
+	end
+
+	local function getEggLuckValue(eggPart)
+		local luckAttr = eggPart:GetAttribute("EggInfoLuck") or eggPart:GetAttribute("HatchLuck")
+		if typeof(luckAttr) == "number" then
+			return luckAttr
+		elseif typeof(luckAttr) == "string" then
+			local n = tonumber(luckAttr:match("([%d%.]+)"))
+			if n then return n end
+		end
+		local overhead = eggPart:FindFirstChild("EggOverhead")
+		local infoUi = overhead and overhead:FindFirstChild("EggInfoUi")
+		if infoUi then
+			local luckLbl = infoUi:FindFirstChild("LuckMulti")
+			if luckLbl and luckLbl:IsA("TextLabel") then
+				local n = tonumber((luckLbl.Text or ""):match("([%d%.]+)"))
+				if n then return n end
+			end
+		end
+		return 0
+	end
+
+	local function isEggAlive(eggPart)
+		if not eggPart or not eggPart.Parent then
+			return false
+		end
+		if eggPart:GetAttribute("Broken") == true then
+			return false
+		end
+		local hp = tonumber(eggPart:GetAttribute("Health"))
+		return not hp or hp > 0
+	end
+
+	local function isZoneMatching(actualZone, selectedZone)
+		if not selectedZone or selectedZone == "All Zones" or selectedZone == "" then
+			return true
+		end
+		local a = tostring(actualZone or ""):lower():gsub("[%s_]", "")
+		local s = tostring(selectedZone or ""):lower():gsub("[%s_]", "")
+		-- Compare zone numbers exactly so "Zone 1" does not also match Zone 10-19
+		local aNum, sNum = tonumber(a:match("(%d+)")), tonumber(s:match("(%d+)"))
+		if aNum and sNum then
+			return aNum == sNum
+		end
+		return a == s or a:find(s, 1, true) ~= nil or s:find(a, 1, true) ~= nil
+	end
+
+	local function isEggTypeMatching(actualName, selectedTable)
+		if not selectedTable or next(selectedTable) == nil then
+			return true
+		end
+		local aLower = tostring(actualName or ""):lower()
+		for selName, isSel in pairs(selectedTable) do
+			if isSel and typeof(selName) == "string" then
+				local sLower = selName:lower()
+				if aLower == sLower or aLower:find(sLower, 1, true) or sLower:find(aLower, 1, true) then
+					return true
+				end
+			end
+		end
+		return false
+	end
+
+	local function ensurePickaxeEquipped(character, humanoid)
+		if not character or not humanoid then return end
+		local heldTool = character:FindFirstChildOfClass("Tool")
+		if heldTool then return end
+		local backpack = player:FindFirstChild("Backpack")
+		if not backpack then return end
+		local bestTool = nil
+		for _, t in ipairs(backpack:GetChildren()) do
+			if t:IsA("Tool") then
+				if not bestTool or t.Name:lower():find("pickaxe") then
+					bestTool = t
+				end
+			end
+		end
+		if bestTool then
+			pcall(function()
+				humanoid:EquipTool(bestTool)
+			end)
+		end
+	end
+
+	local function addCandidate(candidates, eggPart, zoneName, myRootPos)
+		if not eggPart or not eggPart:IsA("BasePart") or eggPart.Name:lower():find("nest") then
+			return
+		end
+		if not isEggAlive(eggPart) then
+			return
+		end
+		local skipUntil = skippedEggs[eggPart]
+		if skipUntil then
+			if os.clock() < skipUntil then
+				return
+			end
+			skippedEggs[eggPart] = nil
+		end
+
+		local cleanName = getCleanEggName(eggPart)
+		if not registeredEggTypes[cleanName] then
+			registeredEggTypes[cleanName] = true
+			if Options.AutoFarmEggs then
+				pcall(function()
+					Options.AutoFarmEggs:AddValues(cleanName)
+				end)
+			end
+		end
+
+		if not isEggTypeMatching(cleanName, autoFarm.EggsSelected) then
+			return
+		end
+		local luckVal = getEggLuckValue(eggPart)
+		if autoFarm.MinLuck > 0 and luckVal < autoFarm.MinLuck then
+			return
+		end
+		table.insert(candidates, {
+			part = eggPart,
+			zone = zoneName,
+			name = cleanName,
+			luck = luckVal,
+			hp = tonumber(eggPart:GetAttribute("Health")) or 999999,
+			dist = (eggPart.Position - myRootPos).Magnitude,
+		})
+	end
+
+	local function findBestCandidateEgg(rootPart)
+		local candidates = {}
+		local build = workspace:FindFirstChild("Build")
+		local zoneBuilds = build and build:FindFirstChild("ZoneBuilds")
+		local myRootPos = rootPart.Position
+
+		if zoneBuilds then
+			for _, zoneFolder in ipairs(zoneBuilds:GetChildren()) do
+				local zoneName = zoneFolder.Name
+				if not registeredZones[zoneName] then
+					registeredZones[zoneName] = true
+					if Options.AutoFarmZone then
+						pcall(function()
+							Options.AutoFarmZone:AddValues(zoneName)
+						end)
+					end
+				end
+
+				local eggsFolder = isZoneMatching(zoneName, autoFarm.Zone) and zoneFolder:FindFirstChild("Eggs")
+				if eggsFolder then
+					for _, eggContainer in ipairs(eggsFolder:GetChildren()) do
+						if not eggContainer.Name:lower():find("nest") then
+							local eggPart = eggContainer:FindFirstChild("Egg")
+							if not eggPart and eggContainer:IsA("BasePart") then
+								eggPart = eggContainer
+							end
+							addCandidate(candidates, eggPart, zoneName, myRootPos)
+						end
+					end
+				end
+			end
+		end
+
+		local topEggs = workspace:FindFirstChild("Eggs")
+		if topEggs and (autoFarm.Zone == "All Zones" or autoFarm.Zone == "") then
+			for _, child in ipairs(topEggs:GetChildren()) do
+				local eggPart = child:IsA("BasePart") and child or child:FindFirstChild("Egg")
+				addCandidate(candidates, eggPart, "Workspace", myRootPos)
+			end
+		end
+
+		if #candidates == 0 then
+			return nil
+		end
+
+		if autoFarm.Priority == "Highest Luck Egg" then
+			table.sort(candidates, function(a, b)
+				if a.luck ~= b.luck then
+					return a.luck > b.luck
+				end
+				return a.dist < b.dist
+			end)
+		elseif autoFarm.Priority == "Lowest HP Egg" then
+			table.sort(candidates, function(a, b)
+				if a.hp ~= b.hp then
+					return a.hp < b.hp
+				end
+				return a.dist < b.dist
+			end)
+		else
+			-- "Closest Egg" (Default)
+			table.sort(candidates, function(a, b)
+				return a.dist < b.dist
+			end)
+		end
+
+		local top = candidates[1]
+		return top.part, top.zone, top.name, top.luck, top.hp
+	end
+
+	local function setFarmState(text)
+		if autoFarm.StateLabel then
+			autoFarm.StateLabel:SetText("Farm State: " .. text)
+		end
+	end
+
+	local function setFarmTarget(text)
+		if autoFarm.TargetLabel then
+			autoFarm.TargetLabel:SetText(text)
+		end
+	end
+
+	local function flatDelta(fromPos, toPos)
+		return Vector3.new(toPos.X - fromPos.X, 0, toPos.Z - fromPos.Z)
+	end
+
+	--// Main Zone Auto-Farm Loop \\--
+	task.spawn(function()
+		local lastAfkPulse = 0
+
+		while not Library.Unloaded do
+			if not autoFarm.Enabled then
+				if autoFarm.Target or autoFarm.MoveDir then
+					autoFarm.Target = nil
+					autoFarm.StopMoving()
+				end
+				task.wait(0.3)
+				continue
+			end
+
+			local character = player.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+
+			if not humanoid or not rootPart or humanoid.Health <= 0 then
+				autoFarm.Target = nil
+				autoFarm.MoveDir = nil
+				setFarmState("Waiting for respawn...")
+				task.wait(1)
+				continue
+			end
+
+			-- 1. Ensure pickaxe is equipped so the in-game auto swing can hit
+			ensurePickaxeEquipped(character, humanoid)
+
+			-- 2. Anti-AFK pulse (throttled)
+			if antiAfkEnabled and (os.clock() - lastAfkPulse) > 30 then
+				lastAfkPulse = os.clock()
+				pulseAntiAfk()
+			end
+
+			-- 3. Select target egg
+			local egg, zoneName, eggName, luck, hp = findBestCandidateEgg(rootPart)
+			if not egg then
+				autoFarm.Target = nil
+				autoFarm.StopMoving()
+				setFarmTarget("Target: None found in selected zone")
+				setFarmState("Waiting for egg spawns...")
+				task.wait(0.5)
+				continue
+			end
+
+			autoFarm.Target = egg
+			local hpStr = hp and hp < 999999 and (formatAbbreviatedNumber(hp) .. " HP") or "Active"
+			local luckStr = luck > 0 and string.format(" · 🍀 x%.1f", luck) or ""
+			setFarmTarget(string.format("Target: %s (%s)%s [%s]", eggName, zoneName, luckStr, hpStr))
+
+			local reach = math.clamp(tonumber(autoFarm.Reach) or 7, 4, 15)
+
+			-- 4. Run to the egg at full native speed (direction is applied every frame by applyFarmMove)
+			local startDist = flatDelta(rootPart.Position, egg.Position).Magnitude
+			local runDeadline = os.clock() + (startDist / math.max(humanoid.WalkSpeed, 16)) * 2 + 6
+			local lastProgressPos = rootPart.Position
+			local lastProgressTime = os.clock()
+			local stuckJumps = 0
+			local lastLabelUpdate = 0
+			local gaveUp = false
+
+			while autoFarm.Enabled and not Library.Unloaded and humanoid.Health > 0 and rootPart.Parent and isEggAlive(egg) do
+				local delta = flatDelta(rootPart.Position, egg.Position)
+				local dist = delta.Magnitude
+				if dist <= reach then
+					break
+				end
+
+				autoFarm.MoveDir = delta.Unit
+
+				if os.clock() - lastLabelUpdate > 0.25 then
+					lastLabelUpdate = os.clock()
+					setFarmState(string.format("Running to egg (%dm @ %d spd)", math.floor(dist + 0.5), math.floor(humanoid.WalkSpeed + 0.5)))
+				end
+
+				-- Unstuck handling: jump when blocked, give up on eggs we cannot reach
+				if (rootPart.Position - lastProgressPos).Magnitude > 2 then
+					lastProgressPos = rootPart.Position
+					lastProgressTime = os.clock()
+				elseif (os.clock() - lastProgressTime) > 1 then
+					humanoid.Jump = true
+					stuckJumps += 1
+					lastProgressPos = rootPart.Position
+					lastProgressTime = os.clock()
+				end
+
+				if stuckJumps >= 4 or os.clock() > runDeadline then
+					gaveUp = true
+					break
+				end
+
+				RunService.Heartbeat:Wait()
+			end
+
+			autoFarm.StopMoving()
+
+			if gaveUp then
+				skippedEggs[egg] = os.clock() + 20
+				setFarmTarget("Target: Unreachable, skipping...")
+				task.wait(0.1)
+				continue
+			end
+
+			-- 5. In range: wait while the in-game Auto Swing breaks the egg
+			local brokeInRange = false
+			if autoFarm.Enabled and isEggAlive(egg) and flatDelta(rootPart.Position, egg.Position).Magnitude <= reach + 2 then
+				setFarmState("In Range (Auto-Swinging...)")
+				local lastHp = tonumber(egg:GetAttribute("Health"))
+				local lastHpChange = os.clock()
+				local lastNudge = os.clock()
+
+				while autoFarm.Enabled and not Library.Unloaded and humanoid.Health > 0 do
+					if not isEggAlive(egg) then
+						brokeInRange = true
+						break
+					end
+					local delta = flatDelta(rootPart.Position, egg.Position)
+					if delta.Magnitude > reach + 4 then
+						break
+					end
+
+					local hpNow = tonumber(egg:GetAttribute("Health"))
+					if hpNow ~= lastHp then
+						lastHp = hpNow
+						lastHpChange = os.clock()
+						lastNudge = os.clock()
+					elseif (os.clock() - lastNudge) > 4 and delta.Magnitude > 0.1 then
+						-- No damage registering: briefly step toward the egg so the character faces it
+						autoFarm.MoveDir = delta.Unit
+						task.wait(0.12)
+						autoFarm.StopMoving()
+						lastNudge = os.clock()
+					end
+
+					-- Give up on eggs that take no damage for a long time (e.g. guarded or not breakable)
+					if (os.clock() - lastHpChange) > 20 then
+						skippedEggs[egg] = os.clock() + 20
+						break
+					end
+					task.wait(0.08)
+				end
+			end
+
+			-- 6. Egg broken!
+			if brokeInRange then
+				autoFarm.EggsBroken += 1
+				if autoFarm.StatsLabel then
+					autoFarm.StatsLabel:SetText("Eggs Broken: " .. tostring(autoFarm.EggsBroken))
+				end
+				setFarmTarget("Target: Egg broken! Finding next...")
+				task.wait(0.1)
+			end
+		end
+	end)
+end
 
 --// Live Session Dashboard & Heartbeat Loop \\--
 local renderSteppedConn = RunService.RenderStepped:Connect(function(dt)
@@ -3795,6 +4410,54 @@ Toggles.AutoSwingEnabled:OnChanged(function(Value)
 	autoSaveActiveConfig()
 end)
 
+Toggles.AutoFarmEnabled:OnChanged(function(Value)
+	autoFarm.Enabled = Value
+	if not Value then
+		autoFarm.Target = nil
+		if autoFarm.StopMoving then
+			autoFarm.StopMoving()
+		end
+		if autoFarm.StateLabel then
+			autoFarm.StateLabel:SetText("Farm State: Off")
+		end
+		if autoFarm.TargetLabel then
+			autoFarm.TargetLabel:SetText("Target: Idle")
+		end
+	end
+	autoSaveActiveConfig()
+end)
+
+Options.AutoFarmKey:OnChanged(function()
+	autoSaveActiveConfig()
+end)
+
+Options.AutoFarmZone:OnChanged(function(Value)
+	autoFarm.Zone = tostring(Value or "All Zones")
+	autoSaveActiveConfig()
+end)
+
+Options.AutoFarmEggs:OnChanged(function(Value)
+	if typeof(Value) == "table" then
+		autoFarm.EggsSelected = Value
+	end
+	autoSaveActiveConfig()
+end)
+
+Options.AutoFarmPriority:OnChanged(function(Value)
+	autoFarm.Priority = tostring(Value or "Closest Egg")
+	autoSaveActiveConfig()
+end)
+
+Options.AutoFarmMinLuck:OnChanged(function(Value)
+	autoFarm.MinLuck = tonumber(Value) or 0
+	autoSaveActiveConfig()
+end)
+
+Options.AutoFarmReach:OnChanged(function(Value)
+	autoFarm.Reach = tonumber(Value) or 7
+	autoSaveActiveConfig()
+end)
+
 --// Load Autoload Config on Startup \\--
 SaveManager:LoadAutoloadConfig()
 task.delay(0.6, function()
@@ -3832,6 +4495,11 @@ Library:OnUnload(function()
 	end
 	env.__AllainWASDLoading = false
 	isRunning = false
+	autoFarm.Enabled = false
+	autoFarm.Target = nil
+	if autoFarm.Cleanup then
+		pcall(autoFarm.Cleanup)
+	end
 	antiAfkEnabled = false
 	autoReconnectEnabled = false
 	if lowPowerEnabled then
